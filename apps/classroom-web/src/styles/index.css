@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --caption-size: 28px;
+  --caption-line-height: 1.4;
+  --theme-bg: #0b0f19;
+  --theme-text: #f3f4f6;
+  --theme-accent: #22c55e;
+}
+
+body {
+  font-family: 'Atkinson Hyperlegible', system-ui, -apple-system, sans-serif;
+}
+
+/* Accessibility themes */
+body.theme-high-contrast {
+  --theme-bg: #000000;
+  --theme-text: #ffff00;
+  --theme-accent: #00ffff;
+  background-color: #000000 !important;
+  color: #ffff00 !important;
+}
+
+body.theme-light {
+  --theme-bg: #f9fafb;
+  --theme-text: #111827;
+  --theme-accent: #16a34a;
+  background-color: #f9fafb !important;
+  color: #111827 !important;
+}
+
+body.theme-solarized {
+  --theme-bg: #fdf6e3;
+  --theme-text: #073642;
+  --theme-accent: #2aa198;
+  background-color: #fdf6e3 !important;
+  color: #073642 !important;
+}
+
+/* Custom Live Caption Stash */
+.live-caption-stream {
+  font-size: var(--caption-size);
+  line-height: var(--caption-line-height);
+}
+
+/* Focus styles for keyboard navigation accessibility */
+*:focus-visible {
+  outline: 3px solid #22c55e;
+  outline-offset: 2px;
+}

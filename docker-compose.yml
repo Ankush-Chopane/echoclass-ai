@@ -1,0 +1,15 @@
+# Usage: copy .env.example to .env, fill JWT_SECRET and TEACHER_INVITE_CODE, then `docker compose up -d --build`.
+services:
+  echoclass:
+    build: .
+    ports: ["3000:3000"]
+    env_file: [.env]
+    environment:
+      NODE_ENV: production
+      DATABASE_PATH: /data/echoclass.db
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      TEACHER_INVITE_CODE: ${TEACHER_INVITE_CODE:?set TEACHER_INVITE_CODE in .env}
+    volumes: ["echoclass-data:/data"]
+    restart: unless-stopped
+volumes:
+  echoclass-data:

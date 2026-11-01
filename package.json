@@ -1,0 +1,41 @@
+{
+  "name": "echoclass",
+  "version": "2.0.0",
+  "private": true,
+  "description": "EchoClass AI - real-time speech & sign-gesture captions for deaf and hard-of-hearing students",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "npm run start -w @echoclass/backend",
+    "dev": "npm run dev -w @echoclass/backend",
+    "dev:backend": "npm run dev -w @echoclass/backend",
+    "dev:classroom": "npm run dev -w @echoclass/classroom-web",
+    "dev:public": "npm run dev -w @echoclass/public-web",
+    "build": "npm run build:classroom && npm run build:public",
+    "build:classroom": "npm run build -w @echoclass/classroom-web",
+    "build:public": "npm run build -w @echoclass/public-web",
+    "start:public": "npm run start -w @echoclass/public-web",
+    "test": "npm run test:backend && npm run test:web",
+    "test:backend": "npm run test -w @echoclass/backend",
+    "test:web": "npm run test -w @echoclass/classroom-web",
+    "e2e": "node e2e/browser.mjs",
+    "backup": "npm run backup -w @echoclass/backend",
+    "docs:gestures": "npm run docs:gestures -w @echoclass/backend",
+    "eval:gestures": "npm run eval:gestures -w @echoclass/backend --",
+    "fetch-model": "npm run fetch-model -w @echoclass/backend",
+    "fetch-speech-model": "npm run fetch-speech-model -w @echoclass/backend",
+    "gen-cert": "npm run gen-cert -w @echoclass/backend",
+    "preflight": "npm run preflight -w @echoclass/backend",
+    "setup:offline": "npm run fetch-model && npm run fetch-speech-model"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "axe-core": "4.14.0",
+    "playwright-core": "1.64.1"
+  }
+}

@@ -1,0 +1,36 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo.
+# A persistent disk needs a paid instance type; on "free" the app runs but the SQLite file is wiped on every deploy.
+services:
+  # Classroom app + API + WebSocket (React build served by Express)
+  - type: web
+    name: echoclass-ai
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_PATH
+        value: /data/echoclass.db
+      - key: TEACHER_INVITE_CODE
+        sync: false            # you are prompted for it on first deploy; give teachers this code
+      - key: PUBLIC_URL
+        sync: false            # e.g. https://echoclass-ai.onrender.com (RENDER_EXTERNAL_URL is used if empty)
+    disk:
+      name: echoclass-data
+      mountPath: /data
+      sizeGB: 1
+
+  # Public marketing site (Next.js) - optional
+  - type: web
+    name: echoclass-site
+    runtime: node
+    plan: free
+    rootDir: .
+    buildCommand: npm ci --ignore-scripts && npm run build:public
+    startCommand: npm run start:public
+    envVars:
+      - key: NEXT_PUBLIC_CLASSROOM_URL
+        sync: false            # URL of the echoclass-ai service above; needed at BUILD time

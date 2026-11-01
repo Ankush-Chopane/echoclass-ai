@@ -1,0 +1,12 @@
+{
+  "name": "@echoclass/shared",
+  "version": "1.0.0",
+  "description": "Shared constants, schemas, and definitions for EchoClass AI",
+  "main": "index.js",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./constants": "./constants/index.js",
+    "./gestures": "./gestures.js"
+  }
+}
