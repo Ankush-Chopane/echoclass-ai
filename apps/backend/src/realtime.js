@@ -167,7 +167,9 @@ async function createHub({ db, loadUser, access, server, allowedOrigins = [], sp
       const origin = req.headers.origin;
       if (origin) {
         let host = ''; try { host = new URL(origin).host; } catch { /* invalid */ }
-        if (host !== req.headers.host && !allowedOrigins.includes(origin.replace(/\/+$/, ''))) return reject(403, 'Forbidden');
+        const cleanOrigin = origin.replace(/\/+$/, '');
+        const isAllowed = host === req.headers.host || allowedOrigins.includes('*') || allowedOrigins.includes(cleanOrigin) || origin.endsWith('.vercel.app');
+        if (!isAllowed) return reject(403, 'Forbidden');
       }
       const ticket = url.searchParams.get('ticket') || '';
       const t = tickets.get(ticket); tickets.delete(ticket);

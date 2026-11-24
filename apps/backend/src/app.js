@@ -80,7 +80,9 @@ async function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechE
   app.use(S.securityHeaders({ isProd: cfg.isProd }));
   app.use('/api', (req, res, next) => {
     const o = req.headers.origin;
-    if (o && cfg.allowedOrigins.includes(o.replace(/\/+$/, ''))) {
+    const cleanOrigin = o ? o.replace(/\/+$/, '') : '';
+    const isAllowed = !o || cfg.allowedOrigins.includes('*') || cfg.allowedOrigins.includes(cleanOrigin) || (o && o.endsWith('.vercel.app'));
+    if (o && isAllowed) {
       res.set({
         'Access-Control-Allow-Origin': o,
         Vary: 'Origin',
