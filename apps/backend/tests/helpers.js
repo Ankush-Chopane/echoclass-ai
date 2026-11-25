@@ -2,7 +2,7 @@ const WebSocket = require('ws');
 const { create } = require('../src/server');
 
 async function start(env = {}, deps = {}) {
-  const ctx = await create({ MONGODB_URI: env.MONGODB_URI || 'mongodb://localhost:27017/echoclass_test', ...env }, { limits: { register: 10000, login: 10000 }, ...deps });
+  const ctx = create({ DATABASE_PATH: ':memory:', ...env }, { limits: { register: 10000, login: 10000 }, ...deps });
   await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${ctx.server.address().port}`;
   const api = async (path, { method = 'GET', body, token, headers = {}, raw } = {}) => {

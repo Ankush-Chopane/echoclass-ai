@@ -1,6 +1,7 @@
 // Central, validated configuration. Fails fast with actionable messages instead of running half-configured.
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 
 class ConfigError extends Error { constructor(problems) { super('Invalid configuration:\n - ' + problems.join('\n - ')); this.problems = problems; } }
 const PLACEHOLDERS = new Set(['change-me', 'changeme', 'secret', 'your-secret-here', 'replace-me']);
@@ -11,7 +12,7 @@ function int(env, key, def, { min = -Infinity, max = Infinity } = {}, problems) 
   if (!Number.isInteger(n) || n < min || n > max) { problems.push(`${key} must be an integer between ${min} and ${max} (got "${env[key]}")`); return def; }
   return n;
 }
-// Repo root (…/apps/backend/src -> …). User data (certs, speech model) stays at the root so existing installs keep working.
+// Repo root (…/apps/backend/src -> …). User data (database, certs, speech model) stays at the root so existing installs keep working.
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const list = (v) => String(v || '').split(',').map(s => s.trim().replace(/\/+$/, '')).filter(Boolean);
 
@@ -24,7 +25,8 @@ function load(env = process.env, { warn = () => {} } = {}) {
   cfg.port = int(env, 'PORT', 3000, { min: 1, max: 65535 }, problems);
   cfg.host = env.HOST || '0.0.0.0';   // 0.0.0.0 so students on the classroom Wi-Fi / the hosting platform can reach the server
   cfg.staticDir = path.resolve(env.STATIC_DIR || path.join(ROOT, 'apps', 'classroom-web', 'dist'));   // built React app
-  cfg.mongoUri = env.MONGODB_URI || 'mongodb://localhost:27017/echoclass';
+  cfg.host = env.HOST || '0.0.0.0';
+  cfg.databasePath = env.DATABASE_PATH === ':memory:' ? ':memory:' : path.resolve(env.DATABASE_PATH || path.join(ROOT, 'data', 'echoclass.db'));
 
   let secret = env.JWT_SECRET;
   if (!secret) {
@@ -76,6 +78,11 @@ function load(env = process.env, { warn = () => {} } = {}) {
     maxBytes: int(env, 'TRANSCRIPTION_MAX_BYTES', 2 * 1024 * 1024, { min: 10000, max: 25 * 1024 * 1024 }, problems),
     maxSeconds: int(env, 'TRANSCRIPTION_MAX_SECONDS', 30, { min: 1, max: 300 }, problems),
     timeoutMs: int(env, 'TRANSCRIPTION_TIMEOUT_MS', 20000, { min: 1000, max: 120000 }, problems) };
+
+  // The database folder must be creatable/writable, otherwise "persistent" data silently isn't.
+  if (cfg.databasePath !== ':memory:') try { fs.mkdirSync(path.dirname(cfg.databasePath), { recursive: true }); fs.accessSync(path.dirname(cfg.databasePath), fs.constants.W_OK); }
+  catch (e) { problems.push(`DATABASE_PATH directory "${path.dirname(cfg.databasePath)}" is not writable (${e.code}). Mount a persistent volume there.`); }
+  if (isProd && env.RENDER && !cfg.databasePath.startsWith('/data/')) warn(`Running on Render but DATABASE_PATH (${cfg.databasePath}) is not under the mounted disk /data – data will be lost on redeploy.`);
 
   if (problems.length) throw new ConfigError(problems);
   return cfg;

@@ -64,16 +64,7 @@ function securityHeaders({ isProd }) {
   };
 }
 
-async function audit(db, req, action, { userId = null, detail = null } = {}) {
-  try {
-    await db.collection('audit_log').insertOne({
-      at: Date.now(),
-      user_id: userId ?? req?.user?.id ?? null,
-      action,
-      ip: req?.ip || null,
-      detail: detail ? String(detail).slice(0, 200) : null
-    });
-  } catch { /* never block a request on logging */ }
+function audit(db, req, action, { userId = null, detail = null } = {}) {
+  try { db.prepare('INSERT INTO audit_log(at,user_id,action,ip,detail) VALUES(?,?,?,?,?)').run(Date.now(), userId ?? req?.user?.id ?? null, action, req?.ip || null, detail ? String(detail).slice(0, 200) : null); } catch { /* never block a request on logging */ }
 }
-
 module.exports = { createLimiter, createFailureLock, validatePassword, normalizeEmail, validEmail, cleanText, safeFilename, randomCode, safeEqual, securityHeaders, audit };
