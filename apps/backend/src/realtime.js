@@ -108,7 +108,9 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
       const origin = req.headers.origin;
       if (origin) {
         let host = ''; try { host = new URL(origin).host; } catch { /* invalid */ }
-        if (host !== req.headers.host && !allowedOrigins.includes(origin.replace(/\/+$/, ''))) return reject(403, 'Forbidden');
+        const clean = origin.replace(/\/+$/, '');
+        const isAllowed = host === req.headers.host || allowedOrigins.includes('*') || allowedOrigins.includes(clean) || origin.endsWith('.vercel.app');
+        if (!isAllowed) return reject(403, 'Forbidden');
       }
       const ticket = url.searchParams.get('ticket') || '';
       const t = tickets.get(ticket); tickets.delete(ticket);                           // single use

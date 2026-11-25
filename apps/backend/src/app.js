@@ -63,7 +63,9 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
   app.use(S.securityHeaders({ isProd: cfg.isProd }));
   app.use('/api', (req, res, next) => {            // CORS only for explicitly allowed origins; same-origin needs none
     const o = req.headers.origin;
-    if (o && cfg.allowedOrigins.includes(o.replace(/\/+$/, ''))) {
+    const clean = o ? o.replace(/\/+$/, '') : '';
+    const isAllowed = !o || cfg.allowedOrigins.includes('*') || cfg.allowedOrigins.includes(clean) || (o && o.endsWith('.vercel.app'));
+    if (o && isAllowed) {
       res.set({ 'Access-Control-Allow-Origin': o, Vary: 'Origin', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Audio-Consent, X-Audio-Duration-Ms', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS', 'Access-Control-Max-Age': '600' });
       if (req.method === 'OPTIONS') return res.sendStatus(204);
     }
