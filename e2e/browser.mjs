@@ -20,7 +20,7 @@ const AI = JSON.stringify({ summary: 'The class covered mitochondria.', concepts
 const aiServer = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ content: [{ type: 'text', text: AI }] })); }); });
 await new Promise((r) => aiServer.listen(AIPORT, '127.0.0.1', r));
 
-const server = spawn(process.execPath, ['apps/backend/src/server.js'], { env: { ...process.env, NODE_ENV: 'test', PORT: String(PORT), HOST: '127.0.0.1', DATABASE_PATH: path.join(tmp, 'e2e.db'), JWT_SECRET: 'e2e-secret-'.padEnd(40, 'x'), TEACHER_INVITE_CODE: 'e2e-invite-code', PUBLIC_URL: BASE, AI_PROVIDER: 'anthropic', AI_API_KEY: 'k', AI_MODEL: 'm', AI_BASE_URL: `http://127.0.0.1:${AIPORT}`, TRUST_PROXY: '0', LOG_LEVEL: 'error' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.execPath, ['backend/src/server.js'], { env: { ...process.env, NODE_ENV: 'test', PORT: String(PORT), HOST: '127.0.0.1', DATABASE_PATH: path.join(tmp, 'e2e.db'), JWT_SECRET: 'e2e-secret-'.padEnd(40, 'x'), TEACHER_INVITE_CODE: 'e2e-invite-code', PUBLIC_URL: BASE, AI_PROVIDER: 'anthropic', AI_API_KEY: 'k', AI_MODEL: 'm', AI_BASE_URL: `http://127.0.0.1:${AIPORT}`, TRUST_PROXY: '0', LOG_LEVEL: 'error' }, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverLog = ''; server.stdout.on('data', (d) => serverLog += d); server.stderr.on('data', (d) => serverLog += d);
 for (let i = 0; i < 100; i++) { try { if ((await fetch(BASE + '/health')).ok) break; } catch {} await new Promise((r) => setTimeout(r, 100)); if (i === 99) { console.error('server did not start\n' + serverLog); process.exit(1); } }
 

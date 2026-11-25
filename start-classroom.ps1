@@ -7,7 +7,7 @@ Write-Host "  Starting EchoClass AI Offline Classroom Assistant..." -ForegroundC
 Write-Host "===============================================================" -ForegroundColor Cyan
 
 # 1. Preflight check
-node apps/backend/scripts/preflight.js
+node backend/scripts/preflight.js
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Preflight validation failed. Please check the logs above." -ForegroundColor Red
     Read-Host -Prompt "Press Enter to exit"
@@ -18,4 +18,4 @@ if ($LASTEXITCODE -ne 0) {
 Start-Process "http://localhost:3000"
 
 # 3. Start server
-node apps/backend/src/server.js
+node backend/src/server.js
