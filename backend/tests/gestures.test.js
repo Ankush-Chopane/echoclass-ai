@@ -78,10 +78,24 @@ test('tracker needs a steady hold, fires once, ignores flicker, re-arms after an
 });
 
 test('classifier interface is swappable', () => {
+  assert.equal(G.createClassifier('mlp').name, 'mlp');
   assert.equal(G.createClassifier('geometric').name, 'geometric');
   G.registerClassifier('stub', () => ({ name: 'stub', evaluate: () => ({ status: 'recognised', gesture: 'HELLO', clarity: 1 }) }));
   assert.equal(G.createClassifier('stub').evaluate([]).gesture, 'HELLO');
   assert.throws(() => G.createClassifier('missing'), /Unknown classifier/);
+});
+
+test('trained MLP neural network classifier recognises all 12 gestures with high softmax confidence', () => {
+  const mlp = G.createClassifier('mlp');
+  for (const [name, lm] of CASES) {
+    const r = mlp.evaluate(lm);
+    assert.equal(r.model, 'mlp');
+    assert.equal(r.gesture, name, `${name} predicted as ${r.gesture} (conf=${r.confidence})`);
+    assert.equal(r.status, 'recognised', `${name} status=${r.status} conf=${r.confidence}`);
+    assert.ok(r.confidence >= 0.72 && r.confidence <= 1);
+  }
+  assert.equal(mlp.evaluate(null).status, 'no_hand');
+  assert.equal(mlp.evaluate(hand({ middle: 1 })).status, 'unsupported');
 });
 
 test('evaluation script computes precision/recall/confusion/false-positive rate from labelled data (format check on SYNTHETIC rows)', () => {

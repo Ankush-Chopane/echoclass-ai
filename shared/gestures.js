@@ -1,10 +1,7 @@
-/* EchoClass gesture engine – pure geometry on MediaPipe's 21 hand landmarks (ES module; shared by the React app and the Node tests).
- *
- * WHAT THIS IS: a rule-based recogniser for 12 application-defined, static, one-hand poses.
- * WHAT THIS IS NOT: sign-language translation. Poses are not validated signs of ISL, ASL or any other sign language.
- *
- * "clarity" is a geometric margin (how far the finger measurements are from their decision thresholds, 0..1).
- * It is NOT a probability or an accuracy figure and must never be displayed as a percentage of confidence.
+import MODEL from './gesture-model.js';
+
+/* EchoClass gesture engine – supports both a trained MLP Neural Network classifier ('mlp')
+ * and a rule-based geometric fallback ('geometric') on MediaPipe's 21 3D hand landmarks (ES module; shared by the React app and the Node tests).
  */
 const factory = function () {
   const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
@@ -77,10 +74,91 @@ const factory = function () {
   };
   const CONTEXT = 'Application-defined hand poses chosen to be easy for a camera to separate. They are NOT validated signs of Indian Sign Language, ASL or any other sign language, and the phrases are classroom conventions.';
 
-  /** Classifier interface so a trained model can replace the rules later: { name, evaluate(landmarks, opts) -> {status, gesture, clarity} } */
-  const classifiers = { geometric: () => ({ name: 'geometric', evaluate }) };
+  /** 75-D invariant feature extractor matching backend/scripts/train-gestures.js */
+  function extractFeatures(lm) {
+    const wrist = lm[0];
+    const palm = d(wrist, lm[9]) || 1e-6;
+    const feats = [];
+    for (let i = 0; i < 21; i++) {
+      feats.push((lm[i].x - wrist.x) / palm);
+      feats.push((lm[i].y - wrist.y) / palm);
+      feats.push(((lm[i].z || 0) - (wrist.z || 0)) / palm);
+    }
+    for (const [mcp, , tip] of Object.values(FINGERS)) {
+      feats.push(d(lm[tip], wrist) / (d(lm[mcp], wrist) || 1e-6));
+    }
+    feats.push(d(lm[4], lm[5]) / palm);
+    feats.push((lm[4].y - wrist.y) / palm);
+    feats.push(d(lm[4], lm[8]) / palm);
+    feats.push(d(lm[8], lm[20]) / palm);
+    feats.push(d(lm[4], lm[8]) / palm);
+    feats.push(d(lm[8], lm[12]) / palm);
+    feats.push(d(lm[12], lm[16]) / palm);
+    feats.push(d(lm[16], lm[20]) / palm);
+    feats.push(d(lm[4], lm[17]) / palm);
+    feats.push(d(lm[3], lm[17]) / palm);
+    return feats;
+  }
+
+  /** Neural Network (MLP) forward pass + Softmax inference on 21 hand landmarks. */
+  function evaluateMLP(lm, { minConfidence = 0.72, borderlineConfidence = 0.45 } = {}) {
+    if (!Array.isArray(lm) || lm.length < 21 || lm.some(p => !p || !Number.isFinite(p.x) || !Number.isFinite(p.y))) {
+      return { status: 'no_hand', gesture: null, clarity: 0, confidence: 0, model: 'mlp' };
+    }
+    const a = analyze(lm);
+    if (a.palm < TH.minPalm) {
+      return { status: 'too_small', gesture: null, clarity: 0, confidence: 0, model: 'mlp', analysis: a };
+    }
+    const raw = extractFeatures(lm);
+    let cur = raw.map((v, i) => (v - MODEL.scaler.mean[i]) / (MODEL.scaler.std[i] || 1));
+    const layers = MODEL.layers;
+    for (let l = 0; l < layers.length; l++) {
+      const { W, b } = layers[l];
+      const outDim = b.length;
+      const z = new Array(outDim);
+      for (let j = 0; j < outDim; j++) {
+        let sum = b[j];
+        for (let i = 0; i < cur.length; i++) sum += cur[i] * W[i][j];
+        z[j] = l < layers.length - 1 ? (sum > 0 ? sum : 0) : sum;
+      }
+      cur = z;
+    }
+    const maxZ = Math.max(...cur);
+    const exps = cur.map(v => Math.exp(v - maxZ));
+    const sumE = exps.reduce((acc, v) => acc + v, 0);
+    const probs = exps.map(e => e / sumE);
+
+    let bestIdx = 0;
+    for (let i = 1; i < probs.length; i++) if (probs[i] > probs[bestIdx]) bestIdx = i;
+    const label = MODEL.classes[bestIdx];
+    const conf = Math.round(probs[bestIdx] * 1000) / 1000;
+
+    if (label === 'NONE') {
+      return { status: 'unsupported', gesture: null, clarity: 0, confidence: conf, model: 'mlp', analysis: a };
+    }
+    const status = conf >= minConfidence ? 'recognised' : conf >= borderlineConfidence ? 'borderline' : 'unsupported';
+    return {
+      status,
+      gesture: status === 'unsupported' ? null : label,
+      clarity: conf,
+      confidence: conf,
+      model: 'mlp',
+      analysis: a,
+    };
+  }
+
+  /** Classifier interface: 'mlp' (trained Neural Network) and 'geometric' (rule-based fallback). */
+  const classifiers = {
+    mlp: (opts = {}) => ({
+      name: 'mlp',
+      architecture: MODEL.architecture,
+      validationAccuracy: MODEL.validationAccuracy,
+      evaluate: (lm, o) => evaluateMLP(lm, { ...opts, ...o }),
+    }),
+    geometric: () => ({ name: 'geometric', evaluate }),
+  };
   const registerClassifier = (name, factory) => { classifiers[name] = factory; };
-  const createClassifier = (name = 'geometric', opts) => { if (!classifiers[name]) throw new Error('Unknown classifier: ' + name); return classifiers[name](opts); };
+  const createClassifier = (name = 'mlp', opts) => { if (!classifiers[name]) throw new Error('Unknown classifier: ' + name); return classifiers[name](opts); };
 
   /** Debounces per-frame guesses into confirmed signs: needs `hold` consecutive frames, fires once, and re-arms only after a
       different sign is confirmed or the hand is absent for `release` frames. Borderline/unsupported frames reset the hold. */
@@ -98,8 +176,8 @@ const factory = function () {
       reset() { cand = null; run = 0; fired = null; miss = 0; },
     };
   }
-  return { analyze, classify, evaluate, createClassifier, registerClassifier, createTracker, DEFAULTS, CONTEXT, THRESHOLDS: TH };
+  return { analyze, classify, evaluate, evaluateMLP, extractFeatures, createClassifier, registerClassifier, createTracker, DEFAULTS, CONTEXT, THRESHOLDS: TH, MODEL_INFO: { architecture: MODEL.architecture, validationAccuracy: MODEL.validationAccuracy, classes: MODEL.classes } };
 };
 const G = factory();
-export const { analyze, classify, evaluate, createClassifier, registerClassifier, createTracker, DEFAULTS, CONTEXT, THRESHOLDS } = G;
+export const { analyze, classify, evaluate, evaluateMLP, extractFeatures, createClassifier, registerClassifier, createTracker, DEFAULTS, CONTEXT, THRESHOLDS, MODEL_INFO } = G;
 export default G;

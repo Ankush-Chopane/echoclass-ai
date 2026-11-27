@@ -62,6 +62,7 @@ function load(env = process.env, { warn = () => {} } = {}) {
     if (p === 'none') return { provider: 'none' };
     if (!allowed.includes(p)) { problems.push(`${name}_PROVIDER must be one of: none, ${allowed.join(', ')}`); return { provider: 'none' }; }
     if (p === 'vosk') return { provider: 'vosk', modelPath: cfg.voskModelPath, pythonPath: cfg.pythonPath };
+    if (p === 'local') return { provider: 'local', model: env[name + '_MODEL'] || 'echoclass-nlp-v1' };
     const o = { provider: p, apiKey: env[name + '_API_KEY'], model: env[name + '_MODEL'], baseUrl: (env[name + '_BASE_URL'] || base[p]).replace(/\/+$/, '') };
     if (!o.apiKey) problems.push(`${name}_API_KEY is required when ${name}_PROVIDER=${p}`);
     if (!o.model) problems.push(`${name}_MODEL is required when ${name}_PROVIDER=${p} (model names change; pick one from your provider's docs)`);
@@ -69,7 +70,7 @@ function load(env = process.env, { warn = () => {} } = {}) {
     if (isProd && o.baseUrl && !o.baseUrl.startsWith('https://')) problems.push(`${name}_BASE_URL must use https:// in production`);
     return o;
   };
-  cfg.ai = { ...provider('AI', ['anthropic', 'openai'], { anthropic: 'https://api.anthropic.com', openai: 'https://api.openai.com/v1' }),
+  cfg.ai = { ...provider('AI', ['anthropic', 'openai', 'local'], { anthropic: 'https://api.anthropic.com', openai: 'https://api.openai.com/v1' }),
     maxInputChars: int(env, 'AI_MAX_INPUT_CHARS', 24000, { min: 1000, max: 200000 }, problems),
     timeoutMs: int(env, 'AI_TIMEOUT_MS', 30000, { min: 1000, max: 120000 }, problems),
     dailyLimit: int(env, 'AI_DAILY_LIMIT', 200, { min: 1, max: 100000 }, problems) };

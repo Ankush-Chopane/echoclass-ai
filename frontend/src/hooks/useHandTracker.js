@@ -24,7 +24,7 @@ async function pickModel() {
   return { url: GOOGLE_MODEL, source: 'Google CDN' };
 }
 
-export function useHandTracker({ onGesture, hold = 10, release = 12 } = {}) {
+export function useHandTracker({ onGesture, hold = 10, release = 12, classifier = 'mlp' } = {}) {
   const [status, setStatus] = useState('off');   // off | starting | loading-model | running | error
   const [error, setError] = useState(null);      // { code, message }
   const [permission, setPermission] = useState('unknown');
@@ -35,6 +35,8 @@ export function useHandTracker({ onGesture, hold = 10, release = 12 } = {}) {
   const parts = useRef(null);
   const cb = useRef({ onGesture }); cb.current = { onGesture };
   const tracker = useRef(Gestures.createTracker({ hold, release }));
+  const clfRef = useRef(null);
+  clfRef.current = Gestures.createClassifier(classifier);
   const lastPaint = useRef(0);
 
   useEffect(() => { cameraPermission().then(setPermission); }, []);
@@ -110,7 +112,7 @@ export function useHandTracker({ onGesture, hold = 10, release = 12 } = {}) {
           const res = p.landmarker.detectForVideo(video, performance.now());
           const lm = res.landmarks?.[0] || null;
           draw(lm);
-          const ev = lm ? Gestures.evaluate(lm) : { status: 'no_hand', gesture: null, clarity: 0 };
+          const ev = lm ? clfRef.current.evaluate(lm) : { status: 'no_hand', gesture: null, clarity: 0 };
           const fired = tracker.current.push(ev.status === 'recognised' ? ev.gesture : null);
           if (fired) cb.current.onGesture?.(fired, ev);
           const now = performance.now();

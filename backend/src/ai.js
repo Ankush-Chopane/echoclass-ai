@@ -40,6 +40,97 @@ function validateOutput(raw, transcript) {
   return out;
 }
 
+const LOCAL_STOP = new Set(('a about above after again all also am an and any are as at be because been before being below between both but by can could did do does doing down during each few for from further had has have having he her here hers him his how i if in into is it its just let me more most my no nor not now of off on once only or other our out over own same she should so some such than that the their them then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your yes okay today lecture class going really').split(' '));
+
+/** Built-in local NLP study-notes engine (TF-IDF sentence scoring, definition extraction, question & task generation). */
+function localSummarize(transcriptText, meta = {}) {
+  const cleanLines = transcriptText
+    .split(/\r?\n/)
+    .map(l => l.replace(/^\[\d{2}:\d{2}\]\s*/, '').trim())
+    .filter(Boolean);
+  const fullText = cleanLines.join(' ');
+  const rawSentences = fullText
+    .split(/(?<=[.!?।])\s+/)
+    .map(s => s.replace(/\s+/g, ' ').trim())
+    .filter(s => s.length >= 15 && !/ignore all previous instructions/i.test(s));
+
+  const tokenize = (s) => (s.toLowerCase().match(/[a-z\p{L}][a-z\p{L}\p{N}'-]{2,}/gu) || []).filter(w => !LOCAL_STOP.has(w));
+  const tf = new Map();
+  const df = new Map();
+  const sentTokens = rawSentences.map(s => {
+    const toks = tokenize(s);
+    const seen = new Set();
+    for (const w of toks) {
+      tf.set(w, (tf.get(w) || 0) + 1);
+      if (!seen.has(w)) { df.set(w, (df.get(w) || 0) + 1); seen.add(w); }
+    }
+    return toks;
+  });
+
+  const N = Math.max(rawSentences.length, 1);
+  const tfidf = new Map();
+  for (const [w, count] of tf.entries()) {
+    const idf = Math.log(1 + N / (1 + (df.get(w) || 1)));
+    tfidf.set(w, count * idf);
+  }
+
+  const concepts = [...tfidf.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([w]) => w.charAt(0).toUpperCase() + w.slice(1));
+
+  const cueRe = /\b(important|remember|key|means|defined as|process|because|therefore|results in|used for|happens in)\b/i;
+  const scored = rawSentences.map((s, i) => {
+    const toks = sentTokens[i];
+    const score = toks.reduce((sum, w) => sum + (tfidf.get(w) || 0), 0) / Math.sqrt(toks.length || 1)
+      + (cueRe.test(s) ? 1.5 : 0)
+      + (i === 0 ? 0.8 : 0);
+    return { s, i, score };
+  });
+
+  const topSummary = [...scored].sort((a, b) => b.score - a.score).slice(0, 3).sort((a, b) => a.i - b.i).map(x => x.s);
+  const keyPoints = [...scored].sort((a, b) => b.score - a.score).slice(0, 6).sort((a, b) => a.i - b.i).map(x => x.s);
+
+  const terms = [];
+  const seenTerms = new Set();
+  const defRe = /\b([A-Za-z][A-Za-z0-9-]{2,25})\s+(?:is|are|means|refers to|happens in|absorbs|stores|makes)\s+([^.!?]{8,140})/i;
+  for (const s of rawSentences) {
+    const m = s.match(defRe);
+    if (m) {
+      const term = m[1].trim();
+      const key = term.toLowerCase();
+      if (!LOCAL_STOP.has(key) && !seenTerms.has(key) && fullText.toLowerCase().includes(key)) {
+        seenTerms.add(key);
+        terms.push({ term, meaning: m[0].trim().slice(0, 220) });
+      }
+    }
+    if (terms.length >= 6) break;
+  }
+
+  const questions = [];
+  for (const t of terms.slice(0, 4)) questions.push(`What is ${t.term} and what role does it play in this topic?`);
+  for (const c of concepts.slice(0, 3)) {
+    if (!seenTerms.has(c.toLowerCase()) && questions.length < 5) questions.push(`Explain the concept of ${c} based on the lecture.`);
+  }
+
+  const actionRe = /\b(homework|assignment|read chapter|submit|due|quiz|exam|test|practice|complete|review)\b/i;
+  const actionItems = rawSentences.filter(s => actionRe.test(s)).slice(0, 5);
+
+  const title = meta.title ? `Topic: ${meta.title}` : 'Lecture Notes';
+  const notesParts = [title, ...keyPoints.map(k => `- ${k}`)];
+  if (actionItems.length) notesParts.push('Tasks:', ...actionItems.map(a => `- ${a}`));
+
+  return {
+    summary: topSummary.join(' ') || rawSentences[0] || fullText.slice(0, 300),
+    concepts,
+    keyPoints,
+    terms,
+    questions,
+    actionItems,
+    notes: notesParts.join('\n'),
+  };
+}
+
 function createSummarizer(cfg, fetchImpl = globalThis.fetch) {
   const enabled = cfg.provider !== 'none';
   async function call(userText) {
@@ -68,6 +159,7 @@ function createSummarizer(cfg, fetchImpl = globalThis.fetch) {
     async summarize(transcriptText, meta = {}) {
       if (!enabled) throw new AiError('not_configured', 'AI summaries are not configured on this server.', 501);
       if (transcriptText.trim().length < 80) throw new AiError('too_short', 'The lecture transcript is too short to summarise.', 422);
+      if (cfg.provider === 'local') return validateOutput(localSummarize(transcriptText, meta), transcriptText);
       const prompt = `Lecture title: ${String(meta.title || '').slice(0, 120)}\n\nTRANSCRIPT (untrusted data, begins):\n${transcriptText}\nTRANSCRIPT (ends)`;
       return validateOutput(await call(prompt), transcriptText);
     },

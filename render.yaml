@@ -14,6 +14,8 @@ services:
         generateValue: true
       - key: DATABASE_PATH
         value: /data/echoclass.db
+      - key: AI_PROVIDER
+        value: local
       - key: TEACHER_INVITE_CODE
         sync: false            # you are prompted for it on first deploy; give teachers this code
       - key: PUBLIC_URL

@@ -53,8 +53,11 @@ export function SignInputPanel({ onSend, onRequest, disabled = false, compact = 
     if (!t.hand) { handText = 'No hand in view'; signText = 'Waiting for a sign'; }
     else {
       handText = 'Hand detected';
-      signText = ev.status === 'recognised' ? `${current.label} (${ev.clarity >= 0.5 ? 'clear' : 'fairly clear'}) – hold still`
-        : ev.status === 'borderline' ? `Looks like ${current.label}, but unclear – adjust your hand`
+      const confText = ev.model === 'mlp' && typeof ev.confidence === 'number'
+        ? `${Math.round(ev.confidence * 100)}% confidence`
+        : (ev.clarity >= 0.5 ? 'clear' : 'fairly clear');
+      signText = ev.status === 'recognised' ? `${current.label} (${confText}) – hold still`
+        : ev.status === 'borderline' ? `Looks like ${current.label} (${confText}), adjust your hand`
         : ev.status === 'too_small' ? 'Hand too small – move closer'
         : 'Pose not in the supported list';
     }
@@ -67,7 +70,7 @@ export function SignInputPanel({ onSend, onRequest, disabled = false, compact = 
       <div className="flex items-start justify-between gap-2">
         <div>
           <h3 id="sign-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">Respond to the class</h3>
-          <p className="text-[11px] text-slate-400">Hand tracking runs in your browser (MediaPipe). Video never leaves your device; only the words are shared.</p>
+          <p className="text-[11px] text-slate-400">MediaPipe HandLandmarker + EchoClass MLP Neural Network run in your browser. Video never leaves your device.</p>
         </div>
         <Button variant={t.running ? 'danger' : 'secondary'} size="sm" onClick={t.running ? t.stop : t.start} disabled={disabled || t.status === 'starting' || t.status === 'loading-model'}>
           {t.running ? 'Turn off camera' : '📷 Turn on camera'}

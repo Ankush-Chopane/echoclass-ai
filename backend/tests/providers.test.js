@@ -106,6 +106,19 @@ test('lecture too short to summarise is refused', async () => {
   const r = await h.api(`/api/sessions/${sess.id}/ai-summary`, { method: 'POST', token: T.token, body: { confirmExternal: true } }); assert.equal(r.status, 422); await h.close();
 });
 
+test('local NLP study-notes provider works offline with zero external API keys', async () => {
+  const h = await start({ AI_PROVIDER: 'local' }); const L = await lecture(h);
+  assert.equal((await h.api('/api/config')).body.aiSummaries, true);
+  const r = await gen(h, L); assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.model, 'echoclass-nlp-v1');
+  assert.ok(r.body.summary.length > 20);
+  assert.ok(r.body.concepts.length > 0);
+  assert.ok(r.body.terms.some(t => /mitochondria|photosynthesis/i.test(t.term)));
+  assert.ok(r.body.actionItems.some(a => /chapter four/i.test(a)));
+  assert.ok(!JSON.stringify(r.body).includes('PRIVATE student message'));
+  await h.close();
+});
+
 // ---------- transcription adapter ----------
 const webm = Buffer.concat([Buffer.from('1a45dfa3', 'hex'), Buffer.alloc(2000, 1)]);
 const trEnv = (o = {}) => ({ TRANSCRIPTION_PROVIDER: 'openai', TRANSCRIPTION_API_KEY: 'tr-key', TRANSCRIPTION_MODEL: 'tr-model', TRANSCRIPTION_BASE_URL: mockUrl, TRANSCRIPTION_MAX_BYTES: '10000', ...o });
