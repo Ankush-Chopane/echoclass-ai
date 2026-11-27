@@ -190,6 +190,33 @@ test('teacher audio is opt-in, room-scoped, targeted, and cleared when the teach
   [a, b, late, t2, outsider].forEach(w => w.close());
 });
 
+test('authenticated classroom sockets receive short-lived TURN credentials', async () => {
+  const relayHub = await start({
+    TURN_URLS: 'turns:relay.example.com:443?transport=tcp',
+    TURN_SHARED_SECRET: 'test-turn-shared-secret-that-is-long-enough'
+  });
+  try {
+    const teacher = await relayHub.user('teacher', 'Relay Teacher');
+    const classroom = await relayHub.classroom(teacher);
+    const session = await relayHub.live(teacher, classroom);
+    const socket = await relayHub.connect(teacher, session.id);
+    const iceServers = socket.msgs.find(m => m.type === 'init').iceServers;
+    assert.deepEqual(iceServers[0], { urls: ['stun:stun.l.google.com:19302'] });
+    const relay = iceServers[1];
+    assert.deepEqual(relay.urls, ['turns:relay.example.com:443?transport=tcp']);
+    assert.equal(relay.credentialType, 'password');
+    const [expires, userId] = relay.username.split(':');
+    assert.equal(userId, String(teacher.user.id));
+    assert.ok(Number(expires) >= Math.floor(Date.now() / 1000) + 3590);
+    const expected = require('node:crypto').createHmac('sha1', 'test-turn-shared-secret-that-is-long-enough')
+      .update(relay.username).digest('base64');
+    assert.equal(relay.credential, expected);
+    socket.close();
+  } finally {
+    await relayHub.close();
+  }
+});
+
 test('ending a lesson notifies and closes sockets; ended lessons refuse new connections and messages', async () => {
   const tw = await h.connect(T, sess.id), a = await h.connect(S1, sess.id);
   const closed = new Promise(r => a.on('close', c => r(c)));

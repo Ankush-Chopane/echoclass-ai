@@ -8,6 +8,12 @@ import { LoadingIndicator, EmptyState } from '../components/common/StatusBadge';
 
 const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
 const List = ({ items, ordered }) => (items?.length ? React.createElement(ordered ? 'ol' : 'ul', { className: `text-sm text-slate-300 space-y-1 ${ordered ? 'list-decimal' : 'list-disc'} list-inside` }, items.map((x, i) => <li key={i}>{x}</li>)) : <p className="text-xs text-slate-400">None found in this lecture.</p>);
+const EXPORT_FORMATS = [
+  { format: 'txt', description: 'plain text (.txt)' },
+  { format: 'srt', description: 'SubRip subtitles (.srt)' },
+  { format: 'vtt', description: 'WebVTT subtitles (.vtt)' },
+  { format: 'json', description: 'JSON data (.json)' }
+];
 
 function Highlight({ text, term }) {
   if (!term) return text;
@@ -78,6 +84,7 @@ export function TranscriptPage() {
   const rows = onlyConfusing ? items.filter((c) => flags[c.id]?.confusing) : items;
   const totalRequests = Object.values(requests || {}).reduce((a, b) => a + b, 0);
   const a = ai.data;
+  const showStudyNotes = Boolean(a) || ai.state === 'loading' || Boolean(ai.error) || meta.ai.available;
 
   return (
     <div className="flex flex-col gap-6">
@@ -88,7 +95,7 @@ export function TranscriptPage() {
           <p className="text-xs text-slate-400 mt-1">{new Date(session.started_at).toLocaleString()} · {meta.captionCount} captions · {mmss(summary.stats.durationMs)} · {summary.stats.words} words{summary.stats.wordsPerMinute ? ` · ${summary.stats.wordsPerMinute} words/min` : ''} · {totalRequests} student requests</p>
         </div>
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Download transcript">
-          {['txt', 'srt', 'vtt', 'json'].map((f) => <Button key={f} variant="secondary" size="sm" onClick={() => download(f)}>⬇ {f.toUpperCase()}</Button>)}
+          {EXPORT_FORMATS.map(({ format, description }) => <Button key={format} variant="secondary" size="sm" title={`Download ${description}`} aria-label={`Download transcript as ${description}`} onClick={() => download(format)}>Download {format.toUpperCase()}</Button>)}
           {isTeacher && <Button variant="danger" size="sm" onClick={() => setDeleteOpen(true)}>Delete</Button>}
         </div>
       </header>
@@ -97,8 +104,8 @@ export function TranscriptPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 flex flex-col gap-4">
           <section className="p-5 rounded-xl bg-slate-900 border border-slate-800" aria-labelledby="auto-h">
-            <h2 id="auto-h" className="text-sm font-bold text-slate-200">Automatic summary</h2>
-            <p className="text-[11px] text-slate-400 mb-3">Made without AI by counting words and picking the most-discussed sentences.</p>
+            <h2 id="auto-h" className="text-sm font-bold text-slate-200">Quick transcript summary</h2>
+            <p className="text-[11px] text-slate-400 mb-3">Basic, non-AI highlights from repeated terms and representative caption lines.</p>
             <div className="flex flex-wrap gap-1.5 mb-3">
               {summary.keywords.length === 0 && <span className="text-xs text-slate-400 italic">Not enough speech to find key terms.</span>}
               {summary.keywords.map((k) => <button key={k.word} type="button" onClick={() => setSearch(k.word)} className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold hover:bg-emerald-500/20">{k.word} ×{k.count}</button>)}
@@ -113,7 +120,7 @@ export function TranscriptPage() {
             </section>
           )}
 
-          <section className="p-5 rounded-xl bg-slate-900 border border-slate-800" aria-labelledby="ai-h">
+          {showStudyNotes && <section className="p-5 rounded-xl bg-slate-900 border border-slate-800" aria-labelledby="ai-h">
             <div className="flex items-center justify-between mb-2">
               <h2 id="ai-h" className="text-sm font-bold text-slate-200">Study notes</h2>
               {a && isTeacher && meta.ai.available && <Button variant="ghost" size="sm" onClick={() => setConsentOpen(true)}>Regenerate</Button>}
@@ -139,7 +146,7 @@ export function TranscriptPage() {
                 : <p className="text-xs text-slate-400">Your teacher has not generated study notes for this lecture.</p>
               )}
             </div>
-          </section>
+          </section>}
         </div>
 
         <section className="lg:col-span-2 flex flex-col gap-3" aria-labelledby="full-h">

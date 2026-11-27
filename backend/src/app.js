@@ -95,7 +95,7 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount } = {}) {
   const idParam = (req) => { const n = Number(req.params.id); return Number.isSafeInteger(n) && n > 0 ? n : 0; };
 
   const server = http.createServer(app);
-  const hub = createHub({ db, loadUser, access, server, allowedOrigins: cfg.allowedOrigins });
+  const hub = createHub({ db, loadUser, access, server, allowedOrigins: cfg.allowedOrigins, ice: cfg.ice });
 
   // ---------- health + public config ----------
   app.get('/health', (req, res) => {

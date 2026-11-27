@@ -41,6 +41,7 @@ export function LiveClassroomPage() {
   const [flash, setFlash] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const cooldown = useRef({});
   const scroller = useRef(null);
   const stick = useRef(true);
@@ -66,7 +67,9 @@ export function LiveClassroomPage() {
   }, [id]);
 
   const ws = useWebSocket(sessionId);
-  const { captions, interim, presence, flags, requests, studentAlerts, teacherVideo, studentVideos, teacherAudioActive, teacherAudioOwned, teacherAudioError, audioListening, audioListeners, status, notice, failure, sendCaption, sendFlag, sendRequest, sendRaw, clearTeacherAudioError } = ws;
+  const { captions, interim, presence, flags, requests, studentAlerts, notifications, teacherVideo, studentVideos, teacherAudioActive, teacherAudioOwned, teacherAudioError, audioListening, audioListeners, iceServers, status, notice, failure, sendCaption, sendFlag, sendRequest, sendRaw, clearTeacherAudioError } = ws;
+
+  useEffect(() => { setNotificationsOpen(false); }, [sessionId]);
 
   // When the lecture ends (teacher pressed End, or it ended elsewhere) everyone is taken to the saved transcript.
   useEffect(() => { if (status === 'ended' && sessionId) { const t = setTimeout(() => navigate(`/transcripts/${sessionId}`, { replace: true }), 1500); return () => clearTimeout(t); } return undefined; }, [status, sessionId, navigate]);
@@ -91,7 +94,8 @@ export function LiveClassroomPage() {
     teacherAudioOwned,
     teacherAudioError,
     audioListening,
-    audioListeners
+    audioListeners,
+    iceServers
   });
   const stopAll = useCallback(() => { browserMic.stop(); teacherCam.stop(); classAudio.stopTeacherAudio(); }, [browserMic, teacherCam, classAudio.stopTeacherAudio]);
 
@@ -101,6 +105,14 @@ export function LiveClassroomPage() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [isTeacher, micOn, teacherCam.active, classAudio.teacherStatus]);
+  useEffect(() => {
+    if (!isTeacher || !studentAlerts.length) return undefined;
+    const timers = studentAlerts.map((alert) => setTimeout(
+      () => ws.dismissStudentAlert(alert.id),
+      Math.max(0, alert.expiresAt - Date.now())
+    ));
+    return () => timers.forEach(clearTimeout);
+  }, [isTeacher, studentAlerts, ws.dismissStudentAlert]);
   useEffect(() => { if (status === 'ended' || status === 'failed') stopAll(); }, [status, stopAll]);
 
   // 3) Auto-scroll only while the reader is at the bottom (never yank the view away from someone re-reading).
@@ -151,6 +163,7 @@ export function LiveClassroomPage() {
   const showVideoStage = isTeacher ? (teacherCam.status === 'starting' || teacherCam.active) : teacherVideo.active;
   const studentsInRoom = presence.filter((p) => p.role === 'student');
   const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('') || '?';
+  const unreadNotifications = notifications.filter((item) => !item.read).length;
 
   return (
     <div className="flex flex-col gap-3 sm:gap-4">
@@ -164,14 +177,65 @@ export function LiveClassroomPage() {
           </div>
         </div>
         {isTeacher
-          ? <Button variant="danger" size="sm" onClick={() => setConfirmEnd(true)} disabled={readOnly}>■ End lecture and save transcript</Button>
+          ? <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-expanded={notificationsOpen}
+                onClick={() => {
+                  const opening = !notificationsOpen;
+                  setNotificationsOpen(opening);
+                  if (opening) ws.markNotificationsRead();
+                }}
+              >
+                🔔 Notifications{unreadNotifications > 0 ? ` (${unreadNotifications})` : ''}
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => setConfirmEnd(true)} disabled={readOnly}>■ End lecture and save transcript</Button>
+            </div>
           : <Button variant="secondary" size="sm" onClick={() => navigate(`/classrooms/${id}`)}>Leave class</Button>}
       </header>
 
       <div className="sr-only" role="status" aria-live="polite">{`Connection: ${badgeLabel}`}</div>
+      {isTeacher && notificationsOpen && (
+        <section id="student-notifications" className="rounded-xl border border-slate-700 bg-slate-900 p-4" aria-label="Student notification history">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-bold text-white">Student notifications</h2>
+            <div className="flex gap-2">
+              {notifications.length > 0 && <Button size="sm" variant="secondary" onClick={ws.clearNotifications}>Clear history</Button>}
+              <Button size="sm" variant="secondary" onClick={() => setNotificationsOpen(false)}>Close</Button>
+            </div>
+          </div>
+          {notifications.length === 0
+            ? <p className="text-sm text-slate-400">Student messages and requests will appear here.</p>
+            : <ol className="max-h-80 space-y-2 overflow-y-auto" aria-live="polite">
+                {[...notifications].reverse().map((notification) => {
+                  const isRequest = notification.kind === 'request';
+                  const requestLabel = REQUEST_BUTTONS.find(([kind]) => kind === notification.request)?.[2];
+                  return (
+                    <li key={notification.id} className={`rounded-lg border p-3 ${notification.read ? 'border-slate-700 bg-slate-950/60' : 'border-amber-500/70 bg-amber-950/20'}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-amber-200">
+                          {isRequest ? `Student request · ${notification.speaker}` : `Student message · ${notification.speaker}`}
+                          {!notification.read && <span className="ml-2 text-xs text-amber-300">New</span>}
+                        </p>
+                        <time className="text-xs text-slate-400" dateTime={new Date(notification.receivedAt).toISOString()}>
+                          {new Date(notification.receivedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                        </time>
+                      </div>
+                      <p className="mt-1 break-words text-sm text-white">
+                        {isRequest ? requestLabel || 'Needs your attention' : notification.text}
+                        {!isRequest && notification.source === 'sign' && <span className="ml-1 text-xs text-purple-300">(hand gesture)</span>}
+                      </p>
+                      <Button size="sm" className="mt-2" onClick={() => mic.start()} disabled={readOnly}>🎙 Start microphone to reply</Button>
+                    </li>
+                  );
+                })}
+              </ol>}
+        </section>
+      )}
       {isTeacher && studentAlerts.length > 0 && (
         <aside className="fixed top-20 right-3 z-50 w-[calc(100vw-1.5rem)] sm:w-[min(26rem,calc(100vw-2rem))] max-h-[60vh] overflow-y-auto flex flex-col gap-2" aria-label="New student messages and requests">
-          {studentAlerts.slice(-5).reverse().map((alert) => {
+          {[...studentAlerts].reverse().map((alert) => {
             const requestLabel = REQUEST_BUTTONS.find(([kind]) => kind === alert.request)?.[2];
             const isRequest = alert.kind === 'request';
             return (

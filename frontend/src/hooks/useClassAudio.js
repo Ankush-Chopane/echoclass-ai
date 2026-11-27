@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+const EMPTY_ICE_SERVERS = [];
+
 function mediaError(error) {
   if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
     return 'Microphone permission was blocked. Allow microphone access in your browser settings.';
@@ -13,6 +15,16 @@ function mediaError(error) {
   return `Could not start live audio (${error?.name || 'error'}).`;
 }
 
+function connectionError(iceServers) {
+  const hasTurnRelay = iceServers.some((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some((url) => typeof url === 'string' && /^turns?:/i.test(url));
+  });
+  return hasTurnRelay
+    ? 'Live audio could not connect through the TURN relay. Check the relay settings or try again.'
+    : 'This network blocks direct live audio. A TURN relay must be configured by the school for cross-network listening.';
+}
+
 export function useClassAudio({
   isTeacher,
   connected,
@@ -24,7 +36,8 @@ export function useClassAudio({
   teacherAudioOwned,
   teacherAudioError,
   audioListening,
-  audioListeners
+  audioListeners,
+  iceServers = EMPTY_ICE_SERVERS
 }) {
   const [teacherStatus, setTeacherStatus] = useState('off');
   const [studentError, setStudentError] = useState('');
@@ -80,14 +93,14 @@ export function useClassAudio({
     const existing = peers.current.get(userId);
     if (existing) return existing;
 
-    const peer = new RTCPeerConnection({ iceServers: [] });
+    const peer = new RTCPeerConnection({ iceServers });
     peers.current.set(userId, peer);
     peer.onicecandidate = (event) => {
       if (event.candidate) sendSignal(userId, { type: 'candidate', candidate: event.candidate.toJSON() });
     };
     peer.onconnectionstatechange = () => {
       if (peer.connectionState === 'failed') {
-        const message = 'Live audio could not connect. Check that both devices are on the same local network.';
+        const message = connectionError(iceServers);
         if (isTeacher) setTeacherError(message);
         else setStudentError(message);
       }
@@ -105,7 +118,7 @@ export function useClassAudio({
       };
     }
     return peer;
-  }, [isTeacher, sendSignal]);
+  }, [iceServers, isTeacher, sendSignal]);
 
   const addPendingCandidates = useCallback(async (userId, peer) => {
     const candidates = pendingCandidates.current.get(userId) || [];

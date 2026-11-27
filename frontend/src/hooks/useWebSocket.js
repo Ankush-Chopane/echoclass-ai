@@ -7,10 +7,11 @@ import { api, wsBaseUrl } from '../services/api.js';
  *  - reconnects with exponential back-off, re-sending finals that were not acknowledged (the server de-duplicates by `cid`)
  *  - all server state lives in one reducer so React renders from a single source of truth
  */
-const initial = { captions: [], interim: null, presence: [], flags: {}, requests: {}, studentAlerts: [], session: null, teacherVideo: { active: false, speaker: null, frame: null }, teacherAudioActive: false, teacherAudioOwned: false, teacherAudioError: null, audioListening: false, audioListeners: [], studentVideos: {} };
+const initial = { captions: [], interim: null, presence: [], flags: {}, requests: {}, studentAlerts: [], notifications: [], session: null, teacherVideo: { active: false, speaker: null, frame: null }, teacherAudioActive: false, teacherAudioOwned: false, teacherAudioError: null, audioListening: false, audioListeners: [], iceServers: [], studentVideos: {} };
 
 export function reducer(state, a) {
   switch (a.type) {
+    case 'reset': return initial;
     case 'init': {
       const sv = {};
       for (const item of a.studentVideos || []) {
@@ -28,6 +29,7 @@ export function reducer(state, a) {
         teacherAudioError: null,
         audioListening: Boolean(a.audioListening),
         audioListeners: a.audioListeners || [],
+        iceServers: Array.isArray(a.iceServers) ? a.iceServers : [],
         studentVideos: sv,
         interim: null
       };
@@ -38,23 +40,36 @@ export function reducer(state, a) {
       const studentAlert = c.source === 'sign' || c.source === 'student'
         ? { id: `caption-${c.id}`, kind: 'caption', speaker: c.speaker, source: c.source, text: c.text }
         : null;
+      const receivedAt = Date.now();
+      const notification = studentAlert ? { ...studentAlert, receivedAt, read: false } : null;
       return {
         ...state,
         captions: [...state.captions, c],
-        studentAlerts: studentAlert ? [...state.studentAlerts, studentAlert].slice(-8) : state.studentAlerts,
+        studentAlerts: studentAlert ? [...state.studentAlerts, { ...studentAlert, expiresAt: receivedAt + 30_000 }] : state.studentAlerts,
+        notifications: notification ? [...state.notifications, notification].slice(-100) : state.notifications,
         interim: state.interim?.speaker === c.speaker ? null : state.interim
       };
     }
     case 'interim': return { ...state, interim: a.text ? { speaker: a.speaker, text: a.text } : null };
     case 'presence': return { ...state, presence: a.users || [] };
     case 'flag': return { ...state, flags: { ...state.flags, [a.captionId]: { ...(state.flags[a.captionId] || {}), [a.kind]: a.count } } };
-    case 'request': return {
-      ...state,
-      requests: a.counts || state.requests,
-      studentAlerts: a.alert ? [...state.studentAlerts, a.alert].slice(-8) : state.studentAlerts
-    };
+    case 'request': {
+      const receivedAt = Date.now();
+      const notification = a.alert ? { ...a.alert, receivedAt, read: false } : null;
+      return {
+        ...state,
+        requests: a.counts || state.requests,
+        studentAlerts: notification ? [...state.studentAlerts, { ...notification, expiresAt: receivedAt + 30_000 }] : state.studentAlerts,
+        notifications: notification ? [...state.notifications, notification].slice(-100) : state.notifications
+      };
+    }
     case 'dismiss_student_alert': return { ...state, studentAlerts: state.studentAlerts.filter((item) => item.id !== a.id) };
     case 'clear_student_alerts': return { ...state, studentAlerts: [] };
+    case 'mark_notifications_read': {
+      if (state.notifications.every((item) => item.read)) return state;
+      return { ...state, notifications: state.notifications.map((item) => ({ ...item, read: true })) };
+    }
+    case 'clear_notifications': return { ...state, notifications: [] };
     case 'video_state': return { ...state, teacherVideo: { active: Boolean(a.active), speaker: a.speaker || null, frame: a.active ? state.teacherVideo.frame : null } };
     case 'video_frame': return { ...state, teacherVideo: { active: true, speaker: a.speaker || state.teacherVideo.speaker, frame: a.data } };
     case 'student_video_state': {
@@ -92,8 +107,7 @@ export function useWebSocket(sessionId) {
   useEffect(() => {
     if (!sessionId) return undefined;
     let stopped = false, attempt = 0, retryTimer = null, pingTimer = null, ended = false;
-    dispatch({ type: 'init' });
-    dispatch({ type: 'clear_student_alerts' });
+    dispatch({ type: 'reset' });
 
     const flushOutbox = (ws) => outbox.current.forEach((payload) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(payload)));
     const fatal = (msg) => { stopped = true; setFailure(msg); setStatus('failed'); };
@@ -120,7 +134,7 @@ export function useWebSocket(sessionId) {
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         switch (m.type) {
-          case 'init': dispatch({ type: 'init', captions: m.captions, flags: m.flags, requests: m.requests, session: m.session, video: m.video, teacherAudioActive: m.teacherAudioActive, teacherAudioOwned: m.teacherAudioOwned, audioListening: m.audioListening, audioListeners: m.audioListeners, studentVideos: m.studentVideos }); break;
+          case 'init': dispatch({ type: 'init', captions: m.captions, flags: m.flags, requests: m.requests, session: m.session, video: m.video, teacherAudioActive: m.teacherAudioActive, teacherAudioOwned: m.teacherAudioOwned, audioListening: m.audioListening, audioListeners: m.audioListeners, iceServers: m.iceServers, studentVideos: m.studentVideos }); break;
           case 'caption': dispatch({ type: 'caption', caption: m.caption }); break;
           case 'interim': dispatch({ type: 'interim', speaker: m.speaker, text: m.text }); break;
           case 'presence': dispatch({ type: 'presence', users: m.users }); break;
@@ -199,11 +213,13 @@ export function useWebSocket(sessionId) {
 
   const dismissStudentAlert = useCallback((id) => dispatch({ type: 'dismiss_student_alert', id }), []);
   const clearStudentAlerts = useCallback(() => dispatch({ type: 'clear_student_alerts' }), []);
+  const markNotificationsRead = useCallback(() => dispatch({ type: 'mark_notifications_read' }), []);
+  const clearNotifications = useCallback(() => dispatch({ type: 'clear_notifications' }), []);
   const clearTeacherAudioError = useCallback(() => dispatch({ type: 'clear_teacher_audio_error' }), []);
   const subscribeAudioSignals = useCallback((handler) => {
     audioSignalHandlers.current.add(handler);
     return () => audioSignalHandlers.current.delete(handler);
   }, []);
 
-  return { ...state, status, connected: status === 'connected', ended: status === 'ended', failure, notice, sendCaption, sendFlag, sendRequest, sendRaw: raw, dismissStudentAlert, clearStudentAlerts, clearTeacherAudioError, subscribeAudioSignals };
+  return { ...state, status, connected: status === 'connected', ended: status === 'ended', failure, notice, sendCaption, sendFlag, sendRequest, sendRaw: raw, dismissStudentAlert, clearStudentAlerts, markNotificationsRead, clearNotifications, clearTeacherAudioError, subscribeAudioSignals };
 }

@@ -16,6 +16,12 @@ test('production config validation produces actionable errors', () => {
   assert.throws(() => load({ ...prodBase, JWT_SECRET: 'a'.repeat(40), ALLOW_OPEN_TEACHER_SIGNUP: 'true', PORT: 'abc' }), /PORT/);
   const ok = load({ ...prodBase, JWT_SECRET: 'a'.repeat(40), TEACHER_INVITE_CODE: 'invite-12345', PUBLIC_URL: 'https://echo.example.com/' });
   assert.equal(ok.isProd, true); assert.deepEqual(ok.allowedOrigins, ['https://echo.example.com']); assert.equal(ok.trustProxy, 1); assert.equal(ok.ai.provider, 'none');
+  assert.deepEqual(ok.ice.stunUrls, ['stun:stun.l.google.com:19302']);
+  assert.throws(() => load({ ...prodBase, JWT_SECRET: 'a'.repeat(40), TEACHER_INVITE_CODE: 'invite-12345', TURN_URLS: 'turns:relay.example.com:443' }), /TURN_URLS requires/);
+  assert.throws(() => load({ ...prodBase, JWT_SECRET: 'a'.repeat(40), TEACHER_INVITE_CODE: 'invite-12345', TURN_URLS: 'turns:relay.example.com:443', TURN_SHARED_SECRET: 'short' }), /at least 32 characters/);
+  assert.throws(() => load({ ...prodBase, JWT_SECRET: 'a'.repeat(40), TEACHER_INVITE_CODE: 'invite-12345', STUN_URLS: 'https://relay.example.com' }), /invalid STUN URL/);
+  const withTurn = load({ ...prodBase, JWT_SECRET: 'a'.repeat(40), TEACHER_INVITE_CODE: 'invite-12345', TURN_URLS: 'turns:relay.example.com:443?transport=tcp', TURN_SHARED_SECRET: 'b'.repeat(40) });
+  assert.equal(withTurn.ice.turnUrls[0], 'turns:relay.example.com:443?transport=tcp');
   const dev = load({}, { warn: () => {} }); assert.ok(dev.jwtSecret.length >= 32); assert.equal(dev.allowOpenTeacherSignup, true);
   const unwritableDbPath = process.platform === 'win32' ? 'Z:\\nonexistent\\sub\\echo.db' : '/etc/hostname/sub/echo.db';
   assert.throws(() => load({ DATABASE_PATH: unwritableDbPath }), /not writable/);

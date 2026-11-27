@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const T = require('./text');
 const { cleanText } = require('./security');
+const { buildIceServers } = require('./ice');
 
 const REQUEST_KINDS = new Set(['raise_hand', 'slow_down', 'repeat', 'louder', 'understood']);
 const FLAG_KINDS = new Set(['confusing', 'important']);
@@ -11,7 +12,7 @@ const SOURCES = { teacher: new Set(['speech', 'typed']), student: new Set(['sign
 const CID = /^[\w-]{6,64}$/;
 const TICKET_TTL_MS = 30_000, MAX_PER_SESSION = 400, MAX_PER_USER = 4;
 
-function createHub({ db, loadUser, access, server, allowedOrigins = [] }) {
+function createHub({ db, loadUser, access, server, allowedOrigins = [], ice }) {
   const rooms = new Map();       // sessionId -> Set<ws>
   const roomVideo = new Map();   // sessionId -> { active: boolean, speaker: string }
   const roomStudentVideos = new Map(); // sessionId -> Map<userId, { userId, name, active }>
@@ -148,6 +149,7 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [] }) {
       teacherAudioOwned: teacher && roomAudio.get(sid)?.owner === ws,
       audioListening: Boolean(ws.audioListening),
       audioListeners: teacher ? audioListeners(sid) : undefined,
+      iceServers: buildIceServers(ice, user.id),
       studentVideos: teacher ? Array.from(roomStudentVideos.get(sid)?.values() || []) : undefined,
       you: { id: user.id, role: user.role }
     });

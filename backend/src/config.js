@@ -15,6 +15,7 @@ function int(env, key, def, { min = -Infinity, max = Infinity } = {}, problems) 
 // Repo root (…/backend/src -> …).
 const ROOT = path.resolve(__dirname, '..', '..');
 const list = (v) => String(v || '').split(',').map(s => s.trim().replace(/\/+$/, '')).filter(Boolean);
+const urlList = (v) => String(v || '').split(',').map(s => s.trim()).filter(Boolean);
 
 function load(env = process.env, { warn = () => {} } = {}) {
   const problems = [];
@@ -39,6 +40,27 @@ function load(env = process.env, { warn = () => {} } = {}) {
 
   cfg.allowedOrigins = [...new Set([...list(env.ALLOWED_ORIGINS), ...list(env.PUBLIC_URL), ...list(env.RENDER_EXTERNAL_URL)])];
   cfg.trustProxy = int(env, 'TRUST_PROXY', isProd ? 1 : 0, { min: 0, max: 10 }, problems);
+
+  const stunUrls = urlList(env.STUN_URLS || 'stun:stun.l.google.com:19302');
+  const turnUrls = urlList(env.TURN_URLS);
+  const turnUsername = env.TURN_USERNAME || '';
+  const turnCredential = env.TURN_CREDENTIAL || '';
+  const turnSharedSecret = env.TURN_SHARED_SECRET || '';
+  for (const url of stunUrls) if (!/^stuns?:[^\s,]+$/i.test(url)) problems.push(`STUN_URLS contains an invalid STUN URL: "${url}"`);
+  for (const url of turnUrls) if (!/^turns?:[^\s,]+$/i.test(url)) problems.push(`TURN_URLS contains an invalid TURN URL: "${url}"`);
+  if (turnUrls.length && !turnSharedSecret && !(turnUsername && turnCredential)) problems.push('TURN_URLS requires TURN_SHARED_SECRET or both TURN_USERNAME and TURN_CREDENTIAL.');
+  if (!turnUrls.length && (turnSharedSecret || turnUsername || turnCredential)) problems.push('TURN credentials require TURN_URLS.');
+  if (Boolean(turnUsername) !== Boolean(turnCredential)) problems.push('TURN_USERNAME and TURN_CREDENTIAL must be set together.');
+  if (turnSharedSecret && (turnUsername || turnCredential)) problems.push('Use either TURN_SHARED_SECRET or TURN_USERNAME/TURN_CREDENTIAL, not both.');
+  if (turnSharedSecret && (turnSharedSecret.length < 32 || PLACEHOLDERS.has(turnSharedSecret.toLowerCase()))) problems.push('TURN_SHARED_SECRET must be at least 32 characters and not a placeholder.');
+  cfg.ice = {
+    stunUrls,
+    turnUrls,
+    turnUsername,
+    turnCredential,
+    turnSharedSecret,
+    turnCredentialTtlSeconds: int(env, 'TURN_CREDENTIAL_TTL_SECONDS', 3600, { min: 300, max: 86400 }, problems)
+  };
 
   cfg.teacherInviteCode = env.TEACHER_INVITE_CODE || '';
   cfg.allowOpenTeacherSignup = env.ALLOW_OPEN_TEACHER_SIGNUP === 'true' || (!isProd && !cfg.teacherInviteCode);

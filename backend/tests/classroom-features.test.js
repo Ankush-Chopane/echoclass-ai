@@ -44,3 +44,12 @@ test('captions persist in SQLite and the extractive (non-AI) summary and exports
     assert.ok(T.toSRT(caps).includes('-->')); assert.ok(T.toTXT(caps, 'Photosynthesis Lecture').includes('Photosynthesis Lecture'));
   } finally { await h.close(); }
 });
+
+test('extractive summary skips greetings and sentences with no meaningful terms', () => {
+  const summary = T.summarize([
+    { source: 'speech', speaker: 'Teacher', text: 'Hello hello.', t_ms: 1000 },
+    { source: 'speech', speaker: 'Teacher', text: 'Myself how are you hello hello', t_ms: 2000 }
+  ]);
+  assert.deepEqual(summary.keywords, []);
+  assert.deepEqual(summary.highlights, []);
+});

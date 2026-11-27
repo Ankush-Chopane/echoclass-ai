@@ -1,6 +1,9 @@
 // Summaries, keywords, vocabulary correction and subtitle exports.
 const STOP = new Set(('a about above after again all also am an and any are as at be because been before being below between both but by can could did do does doing down during each few for from further had has have having he her here hers him his how i if in into is it its just let me more most my no nor not now of off on once only or other our out over own same she should so some such than that the their them then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your yes okay like going get got one two really thing things know see say said gonna want').split(' '));
 
+STOP.add('hello');
+STOP.add('myself');
+
 const words = (s) => (s.toLowerCase().match(/[\p{L}\p{N}']+/gu) || []);
 
 function applyVocab(text, vocab) {
@@ -31,7 +34,7 @@ function summarize(captions) {
     const score = ws.reduce((n, w) => n + (freq.get(w) || 0), 0) / Math.sqrt(ws.length || 1);
     return { ...x, i, score };
   });
-  const top = scored.sort((a, b) => b.score - a.score).slice(0, 5).sort((a, b) => a.i - b.i).map(({ s, t }) => ({ text: s, t_ms: t }));
+  const top = scored.filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 5).sort((a, b) => a.i - b.i).map(({ s, t }) => ({ text: s, t_ms: t }));
 
   const last = all.length ? all[all.length - 1].t_ms : 0;
   const minutes = Math.max(last / 60000, 1);

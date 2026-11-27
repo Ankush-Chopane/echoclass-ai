@@ -65,6 +65,8 @@ Complete, commented list in [`.env.example`](.env.example). Required in producti
 
 **Render:** New -> Blueprint -> select the repo. `render.yaml` creates the classroom service (Docker, 1 GB disk at `/data`, generated `JWT_SECRET`, prompts for `TEACHER_INVITE_CODE` and `PUBLIC_URL`) and the optional Next.js site (set `NEXT_PUBLIC_CLASSROOM_URL` before its first build). A persistent disk requires a paid instance; on the free tier the SQLite file is wiped on each deploy. Run a single instance (rate limits and the WebSocket rooms are in memory).
 
+For teacher audio to work through restrictive or cross-network connections, configure a TURN relay on the backend as described in [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md#cross-network-teacher-audio-turn).
+
 ## What changed in this revision (fixes to the uploaded project)
 
 | Area | Problem found | Fix |
@@ -105,7 +107,7 @@ Run on a **clean copy** with `npm ci --ignore-scripts`:
 
 ## Known limitations
 
-Single server instance; no email verification or password reset; Web Speech API (Chrome/Edge/Safari) sends recognition audio to the browser vendor's cloud and generally requires internet; there is no offline speech-recognition mode; optional live teacher audio currently expects direct connections on the same local network (cross-network use may require a school-managed TURN server); gestures are 12 fixed poses; the demo feedback form on the public site stores nothing.
+Single server instance; no email verification or password reset; Web Speech API (Chrome/Edge/Safari) sends recognition audio to the browser vendor's cloud and generally requires internet; there is no offline speech-recognition mode; optional live teacher audio needs a TURN relay on networks that block direct WebRTC; gestures are 12 fixed poses; the demo feedback form on the public site stores nothing.
 
 ## Documentation
 

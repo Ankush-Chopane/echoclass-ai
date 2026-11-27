@@ -544,7 +544,7 @@ The WebSocket handles all real-time communication during a live session.
 | `audio_signal` | Teacher/student | `toUserId, signal` | WebRTC signaling relayed only to the opted-in peer in the same class |
 | `ping` | Any | — | Keepalive |
 
-Live teacher audio is peer-to-peer and is not recorded. Direct connections are intended for the same local network; other network layouts may require a TURN server.
+Live teacher audio uses WebRTC and is not recorded. The authenticated WebSocket `init` message includes configured `iceServers`; a TURN relay is required when the network blocks direct routes. With `TURN_SHARED_SECRET`, the backend issues short-lived user-specific credentials. Configure `STUN_URLS`, `TURN_URLS`, and TURN credentials in the backend environment.
 
 ### Source field values
 
