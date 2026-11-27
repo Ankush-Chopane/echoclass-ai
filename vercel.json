@@ -2,7 +2,7 @@
   "buildCommand": "npm run build:frontend",
   "outputDirectory": "frontend/dist",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!assets/|vendor/|models/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
