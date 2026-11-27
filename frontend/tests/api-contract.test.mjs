@@ -86,7 +86,7 @@ test('a rejected token raises the app-wide unauthorized event', async () => {
 test('classrooms: teacher creates, student joins by code, dashboard + detail shapes match what the UI reads', async () => {
   as(S.teacher);
   S.cls = await api.createClassroom({ name: 'Biology 9', subject: 'Science', language: 'en-IN' });
-  assert.match(S.cls.code, /^[A-Z0-9]{8}$/);
+  assert.match(S.cls.code, /^[A-Z0-9]{6}$/);
   as(S.student);
   await assert.rejects(api.createClassroom({ name: 'Nope' }), (e) => e.status === 403);
   await assert.rejects(api.joinClassroom('ZZZZZZZZ'), (e) => e.status === 404);

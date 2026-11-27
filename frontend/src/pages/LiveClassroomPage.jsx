@@ -33,6 +33,7 @@ export function LiveClassroomPage() {
 
   const [classroom, setClassroom] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [waitingLive, setWaitingLive] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [config, setConfig] = useState(null);
 
@@ -47,18 +48,24 @@ export function LiveClassroomPage() {
   const scroller = useRef(null);
   const stick = useRef(true);
 
-  // 1) Find the live session of this classroom. GET /classrooms/:id returns { ...classroom, live: { id, title } | null }.
+  // 1) Find the live session of this classroom. If none is live yet, poll every 4s so students auto-join when the teacher starts.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let timer = null;
+    async function check() {
       try {
         const [cls, cfg] = await Promise.all([api.getClassroom(id), api.getConfig()]);
         if (cancelled) return;
         setClassroom(cls); setConfig(cfg); setLanguage(cls.language || 'en-IN');
-        if (cls.live) setSessionId(cls.live.id); else setLoadError('There is no live lecture in this classroom right now.');
+        if (cls.live) { setWaitingLive(false); setSessionId(cls.live.id); }
+        else {
+          setWaitingLive(true);
+          timer = setTimeout(check, 4000);
+        }
       } catch (e) { if (!cancelled) setLoadError(e.message); }
-    })();
-    return () => { cancelled = true; };
+    }
+    check();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [id]);
 
   const ws = useWebSocket(sessionId);
@@ -112,6 +119,15 @@ export function LiveClassroomPage() {
     return (
       <div className="max-w-xl mx-auto mt-10 p-6 rounded-2xl bg-slate-900 border border-slate-800 text-center" role="alert">
         <p className="text-slate-200 mb-4">{loadError}</p>
+        <Link to={`/classrooms/${id}`}><Button variant="secondary">← Back to classroom</Button></Link>
+      </div>
+    );
+  }
+  if (waitingLive) {
+    return (
+      <div className="max-w-xl mx-auto mt-10 p-6 rounded-2xl bg-slate-900 border border-slate-800 text-center" role="status" aria-live="polite">
+        <LoadingIndicator text="Waiting for your teacher to start the live lecture…" />
+        <p className="text-xs text-slate-400 mt-3 mb-4">This page will open the live classroom automatically as soon as the lecture starts.</p>
         <Link to={`/classrooms/${id}`}><Button variant="secondary">← Back to classroom</Button></Link>
       </div>
     );

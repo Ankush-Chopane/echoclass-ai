@@ -7,7 +7,7 @@ export const createClassroomSchema = z.object({
 });
 
 export const joinClassroomSchema = z.object({
-  code: z.string().trim().transform((s) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')).pipe(z.string().min(6, 'The join code has 8 letters and numbers').max(8, 'The join code has 8 letters and numbers'))
+  code: z.string().trim().transform((s) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')).pipe(z.string().min(6, 'The join code has 6 to 8 letters and numbers').max(8, 'The join code has 6 to 8 letters and numbers'))
 });
 
 export const createSessionSchema = z.object({

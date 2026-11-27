@@ -23,7 +23,11 @@ export function DashboardPage() {
     try { setData(await api.getDashboard()); setError(''); }
     catch (e) { setError(e.message); }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 5000);
+    return () => clearInterval(id);
+  }, [load]);
   // LAN address of this server, for the teacher to give to students on the same Wi-Fi (teacher-only endpoint).
   useEffect(() => { if (isTeacher) api.getNetwork().then(setNetwork).catch(() => {}); }, [isTeacher]);
 
@@ -44,7 +48,12 @@ export function DashboardPage() {
   }
 
   const classrooms = data?.classrooms || [];
-  const lanUrl = network?.localIps?.[0] ? `${network.https ? 'https' : 'http'}://${network.localIps[0]}:${network.https ? network.httpsPort : network.port}` : null;
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isLocalHost = host === 'localhost' || host === '127.0.0.1' || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+  const lanUrl = !network?.isCloud && isLocalHost && network?.localIps?.[0]
+    ? `${network.https ? 'https' : 'http'}://${network.localIps[0]}:${network.https ? network.httpsPort : network.port}`
+    : null;
+  const shareUrl = !isLocalHost && typeof window !== 'undefined' ? window.location.origin : (network?.publicUrl || lanUrl);
 
   return (
     <div className="flex flex-col gap-8">
@@ -67,10 +76,12 @@ export function DashboardPage() {
         </dl>
       )}
 
-      {lanUrl && (
-        <p className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300">
-          📶 <strong>Students on the same Wi-Fi can open:</strong> <code className="text-emerald-300 font-mono bg-slate-950 px-2 py-0.5 rounded">{lanUrl}</code>
-          {network.speechEngine?.ready && <span className="ml-3 text-emerald-400">● Offline speech engine ready</span>}
+      {isTeacher && shareUrl && (
+        <p className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 flex flex-wrap items-center gap-2">
+          <span>{lanUrl ? '📶' : '🌐'} <strong>{lanUrl ? 'Students on the same Wi-Fi can open:' : 'Students on any Wi-Fi or network can open:'}</strong></span>
+          <code className="text-emerald-300 font-mono bg-slate-950 px-2 py-0.5 rounded">{shareUrl}</code>
+          <button type="button" onClick={() => navigator.clipboard?.writeText(shareUrl)} className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold">Copy link</button>
+          {network?.speechEngine?.ready && <span className="ml-auto text-emerald-400">● Offline speech engine ready</span>}
         </p>
       )}
 
@@ -88,7 +99,7 @@ export function DashboardPage() {
       {error ? <div role="alert" className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">{error} <button type="button" className="underline ml-2" onClick={load}>Retry</button></div>
         : !data ? <LoadingIndicator text="Loading your classrooms…" />
         : classrooms.length === 0 ? (
-          <EmptyState title={isTeacher ? 'No classrooms yet' : 'You have not joined a classroom'} description={isTeacher ? 'Create your first classroom, then share its join code with students.' : 'Ask your teacher for the 8-character join code.'}
+          <EmptyState title={isTeacher ? 'No classrooms yet' : 'You have not joined a classroom'} description={isTeacher ? 'Create your first classroom, then share its join code with students.' : 'Ask your teacher for the 6-character join code.'}
             action={<Button onClick={() => open(isTeacher ? 'create' : 'join')}>{isTeacher ? 'Create classroom' : 'Join classroom'}</Button>} />
         ) : (
           <section aria-label="Your classrooms" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -137,7 +148,7 @@ export function DashboardPage() {
       </Modal>
       <Modal isOpen={modal === 'join'} onClose={() => setModal(null)} title="Join a classroom">
         <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-          <Input label="Join code from your teacher" name="code" value={form.code} onChange={set('code')} placeholder="e.g. K7M2QX4P" maxLength={10} autoComplete="off" autoFocus />
+          <Input label="Join code from your teacher" name="code" value={form.code} onChange={set('code')} placeholder="e.g. K7M2QX" maxLength={10} autoComplete="off" autoFocus />
           {formError && <p role="alert" className="text-sm text-rose-400">{formError}</p>}
           <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setModal(null)}>Cancel</Button><Button type="submit" loading={busy}>Join</Button></div>
         </form>

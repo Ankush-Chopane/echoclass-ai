@@ -43,7 +43,11 @@ export function ClassroomDetailPage() {
       setCls(data); setRetention(String(data.retention_days || 0)); setError('');
     } catch (e) { setError(e.message); }
   }, [id]);
-  useEffect(() => { loadClass(); }, [loadClass]);
+  useEffect(() => {
+    loadClass();
+    const timer = setInterval(() => { if (!document.hidden) loadClass(); }, 5000);
+    return () => clearInterval(timer);
+  }, [loadClass]);
 
   const loadLectures = useCallback(async () => {
     setLecturesLoading(true);

@@ -111,15 +111,20 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
   }));
   // LAN addresses are only useful to (and only shown to) a signed-in teacher who is setting up the classroom.
   app.get('/api/system/network', auth, teacherOnly, (req, res) => {
-    const ifaces = os.networkInterfaces();
+    const isCloud = Boolean(process.env.RENDER || process.env.RAILWAY_ENVIRONMENT || process.env.FLY_APP_NAME);
     const localIps = [];
-    for (const list of Object.values(ifaces)) {
-      for (const net of list || []) {
-        if (net.family === 'IPv4' && !net.internal) localIps.push(net.address);
+    if (!isCloud) {
+      const ifaces = os.networkInterfaces();
+      for (const list of Object.values(ifaces)) {
+        for (const net of list || []) {
+          if (net.family === 'IPv4' && !net.internal) localIps.push(net.address);
+        }
       }
     }
     res.json({
       localIps,
+      isCloud,
+      publicUrl: process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || null,
       port: cfg.port,
       host: cfg.host,
       https: cfg.https?.enabled || false,
@@ -231,7 +236,7 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
     if (name.length < 2) return bad(res, 400, 'Give the classroom a name (at least 2 characters).');
     if (!LANG_CODES.has(language)) return bad(res, 400, 'Choose a supported teaching language.');
     let code, r;
-    for (let i = 0; i < 5 && !r; i++) { code = S.randomCode(8); try { r = db.prepare('INSERT INTO classrooms(name,subject,code,teacher_id,language,created_at) VALUES(?,?,?,?,?,?)').run(name, subject, code, req.user.id, language, now()); } catch { /* code clash – retry */ } }
+    for (let i = 0; i < 5 && !r; i++) { code = S.randomCode(6); try { r = db.prepare('INSERT INTO classrooms(name,subject,code,teacher_id,language,created_at) VALUES(?,?,?,?,?,?)').run(name, subject, code, req.user.id, language, now()); } catch { /* code clash – retry */ } }
     if (!r) return bad(res, 500, 'Could not create a unique join code. Try again.');
     S.audit(db, req, 'classroom_created', { detail: String(r.lastInsertRowid) });
     res.status(201).json(classroomView(q.classroom.get(r.lastInsertRowid), true));
@@ -264,7 +269,7 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
   });
   app.post('/api/classrooms/:id/rotate-code', auth, teacherOnly, (req, res) => {
     const c = access(req.user, idParam(req)); if (!c) return bad(res, 404, 'Classroom not found.');
-    for (let i = 0; i < 5; i++) { try { db.prepare('UPDATE classrooms SET code=? WHERE id=?').run(S.randomCode(8), c.id); break; } catch { /* clash */ } }
+    for (let i = 0; i < 5; i++) { try { db.prepare('UPDATE classrooms SET code=? WHERE id=?').run(S.randomCode(6), c.id); break; } catch { /* clash */ } }
     S.audit(db, req, 'code_rotated', { detail: String(c.id) });
     res.json({ code: q.classroom.get(c.id).code });
   });

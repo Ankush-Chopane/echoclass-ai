@@ -12,7 +12,7 @@ test.after(() => h.close());
 const get = (p, u) => h.api(p, { token: u.token });
 
 test('classroom creation validates input; join code is strong; students cannot see it', async () => {
-  assert.match(cls.code, /^[A-HJ-NP-Z2-9]{8}$/);
+  assert.match(cls.code, /^[A-HJ-NP-Z2-9]{6}$/);
   assert.equal((await h.api('/api/classrooms', { method: 'POST', token: T.token, body: { name: 'x' } })).status, 400);
   assert.equal((await h.api('/api/classrooms', { method: 'POST', token: T.token, body: { name: 'Fine', language: 'xx-ZZ' } })).status, 400);
   assert.equal((await get(`/api/classrooms/${cls.id}`, S)).body.code, undefined);
