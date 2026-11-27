@@ -1,9 +1,9 @@
-# EchoClass AI - Offline Classroom PowerShell Startup Script
-$Host.UI.RawUI.WindowTitle = "EchoClass AI - Offline Classroom Server"
+# EchoClass AI - PowerShell Startup Script
+$Host.UI.RawUI.WindowTitle = "EchoClass AI - Classroom Server"
 Set-Location -Path $PSScriptRoot
 
 Write-Host "===============================================================" -ForegroundColor Cyan
-Write-Host "  Starting EchoClass AI Offline Classroom Assistant..." -ForegroundColor Cyan
+Write-Host "  Starting EchoClass AI Classroom Assistant..." -ForegroundColor Cyan
 Write-Host "===============================================================" -ForegroundColor Cyan
 
 # 1. Preflight check

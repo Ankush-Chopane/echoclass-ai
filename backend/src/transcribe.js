@@ -31,48 +31,6 @@ function createTranscriber(cfg, fetchImpl = globalThis.fetch) {
       if (!enabled) throw new TranscribeError('not_configured', 'Server-side transcription is not configured.', 501);
       const { ext, type } = validateAudio(buf, contentType, cfg, declaredMs);
 
-      if (cfg.provider === 'vosk') {
-        // Local, offline Vosk transcription of a short WAV clip. Needs: python + `pip install vosk` + the model (npm run fetch-speech-model).
-        if (ext !== 'wav') throw new TranscribeError('unsupported_type', 'Offline (Vosk) transcription accepts 16-bit PCM WAV audio only.', 415);
-        const { spawn } = require('child_process');
-        const fs = require('fs'), path = require('path');
-        const modelDir = cfg.modelPath || path.join(__dirname, '..', '..', 'models', 'vosk');
-        if (!fs.existsSync(modelDir)) throw new TranscribeError('model_missing', 'Offline Vosk model not found. Run npm run fetch-speech-model.', 503);
-        // The model path is passed as an argument, never spliced into the program text.
-        const program = [
-          'import sys, json, io, wave',
-          'from vosk import Model, KaldiRecognizer, SetLogLevel',
-          'SetLogLevel(-1)',
-          'try:',
-          '    data = sys.stdin.buffer.read()',
-          '    wf = wave.open(io.BytesIO(data), "rb")',
-          '    rec = KaldiRecognizer(Model(sys.argv[1]), wf.getframerate())',
-          '    rec.AcceptWaveform(wf.readframes(wf.getnframes()))',
-          '    print(json.dumps({"text": json.loads(rec.FinalResult()).get("text", "")}))',
-          'except Exception as e:',
-          '    print(json.dumps({"error": str(e)}))',
-        ].join('\n');
-        return new Promise((resolve, reject) => {
-          const p = spawn(cfg.pythonPath || (process.platform === 'win32' ? 'python' : 'python3'), ['-c', program, modelDir]);
-          let out = '', err = '', done = false;
-          const finish = (fn, v) => { if (!done) { done = true; clearTimeout(timer); fn(v); } };
-          const timer = setTimeout(() => { try { p.kill('SIGKILL'); } catch { /* gone */ } finish(reject, new TranscribeError('timeout', 'Offline transcription timed out.', 504)); }, cfg.timeoutMs || 20000);
-          p.stdout.on('data', d => (out += d.toString()));
-          p.stderr.on('data', d => (err += d.toString()));
-          p.on('error', e => finish(reject, new TranscribeError('provider_error', 'Could not start Python for offline transcription (' + e.code + '). Install Python 3 and `pip install vosk`, or set PYTHON_PATH.', 502)));
-          p.on('close', code => {
-            if (code !== 0) return finish(reject, new TranscribeError('provider_error', 'Offline transcription process failed. Is `pip install vosk` done? ' + err.slice(-200), 502));
-            try {
-              const res = JSON.parse(out.trim());
-              if (res.error) return finish(reject, new TranscribeError('provider_error', res.error, 502));
-              finish(resolve, { text: typeof res.text === 'string' ? res.text.replace(/\s+/g, ' ').trim().slice(0, 600) : '' });
-            } catch { finish(reject, new TranscribeError('invalid_output', 'Could not parse Vosk output', 502)); }
-          });
-          p.stdin.on('error', () => { /* process exited early; handled by close */ });
-          p.stdin.end(buf);
-        });
-      }
-
       const form = new FormData();
       form.append('file', new Blob([buf], { type }), `audio.${ext}`); form.append('model', cfg.model);
       if (language && /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(language)) form.append('language', language.split('-')[0]);

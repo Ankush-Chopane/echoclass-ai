@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Trains a Multi-Layer Perceptron (MLP) Neural Network on 21-point 3D hand landmarks
- * for the 12 EchoClass classroom gestures + a NONE (negative/unsupported) class.
+ * Trains an MLP on real, labelled 21-point hand landmarks for the registered classroom cues.
+ * Validation is split by signer; synthetic landmarks are never included in training or validation.
  *
  * Usage:
- *   node backend/scripts/train-gestures.js [--data path/to/samples.jsonl] [--epochs 80]
+ *   node backend/scripts/train-gestures.js --data path/to/samples.jsonl [--epochs 80]
  *
  * Outputs:
  *   shared/gesture-model.json  (trained weights, scaler stats, class labels, validation metrics)
@@ -13,14 +13,12 @@
 
 const fs = require('fs');
 const path = require('path');
+const G = require('@echoclass/shared/gestures').default;
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const OUT_PATH = path.join(ROOT, 'shared', 'gesture-model.json');
 
-const CLASSES = [
-  'HELLO', 'FIST', 'THUMBS_UP', 'THUMBS_DOWN', 'POINT', 'PEACE',
-  'THREE', 'FOUR', 'L', 'OK', 'HELP', 'ILY', 'NONE'
-];
+const CLASSES = [...Object.keys(G.DEFAULTS), 'NONE'];
 
 // --- Feature extraction (must stay identical in shared/gestures.js) ---
 const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
@@ -68,125 +66,79 @@ function makeRng(seed = 42) {
     const u = Math.max(1e-7, rand()), v = rand();
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
   };
-  return { rand, randn, uniform: (a, b) => a + (b - a) * rand() };
+  return { rand, randn };
 }
 
-// --- Realistic 3D hand pose synthesizer with curl, tilt, mirror & noise ---
-function synthHand(rng, ext, { thumbDir = 'side', pinchIndex = false } = {}) {
-  const lm = Array(21);
-  const mirror = rng.rand() < 0.5 ? -1 : 1;
-  const spreadScale = rng.uniform(0.85, 1.15);
-  const cx = 0.5, cy = 0.78;
-  lm[0] = { x: cx, y: cy, z: 0 };
+function loadSamples(file) {
+  const rows = [];
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    let row;
+    try { row = JSON.parse(lines[i]); }
+    catch { throw new Error(`Line ${i + 1} is not valid JSON`); }
 
-  const xs = { index: -0.065, middle: 0.0, ring: 0.06, pinky: 0.12 };
-  const mcpY = { index: -0.18, middle: -0.20, ring: -0.18, pinky: -0.14 };
-  const joints = { index: [5, 6, 7, 8], middle: [9, 10, 11, 12], ring: [13, 14, 15, 16], pinky: [17, 18, 19, 20] };
-
-  for (const k of Object.keys(joints)) {
-    const [m, p, dI, t] = joints[k];
-    const x = cx + mirror * xs[k] * spreadScale;
-    const y = cy + mcpY[k];
-    lm[m] = { x, y, z: rng.randn() * 0.005 };
-    const splay = mirror * (xs[k] * rng.uniform(0.1, 0.4));
-    if (ext[k]) {
-      const len = rng.uniform(0.85, 1.15);
-      lm[p] = { x: x + splay * 0.3, y: y - 0.07 * len, z: rng.randn() * 0.008 };
-      lm[dI] = { x: x + splay * 0.6, y: y - 0.13 * len, z: rng.randn() * 0.01 };
-      lm[t] = { x: x + splay, y: y - 0.19 * len, z: rng.randn() * 0.012 };
-    } else {
-      const curl = rng.uniform(0.8, 1.2);
-      lm[p] = { x, y: y - 0.045 * curl, z: -0.025 };
-      lm[dI] = { x, y: y + 0.005 * curl, z: -0.04 };
-      lm[t] = { x, y: y + 0.045 * curl, z: -0.03 };
+    if (!row || typeof row !== 'object' || Array.isArray(row) || !CLASSES.includes(row.label)) {
+      throw new Error(`Line ${i + 1} has an unsupported label; expected one of: ${CLASSES.join(', ')}`);
     }
-  }
-
-  lm[1] = { x: cx - mirror * 0.05, y: cy - 0.04, z: -0.01 };
-  lm[2] = { x: cx - mirror * 0.09, y: cy - 0.08, z: -0.015 };
-  if (ext.thumb) {
-    if (thumbDir === 'up') {
-      lm[3] = { x: cx - mirror * 0.10, y: cy - 0.20, z: 0 };
-      lm[4] = { x: cx - mirror * 0.11, y: cy - rng.uniform(0.30, 0.38), z: 0 };
-    } else if (thumbDir === 'down') {
-      lm[3] = { x: cx - mirror * 0.10, y: cy + 0.07, z: 0 };
-      lm[4] = { x: cx - mirror * 0.11, y: cy + rng.uniform(0.16, 0.24), z: 0 };
-    } else {
-      lm[3] = { x: cx - mirror * 0.16, y: cy - 0.11, z: 0 };
-      lm[4] = { x: cx - mirror * rng.uniform(0.22, 0.27), y: cy - 0.15, z: 0 };
+    if (typeof row.person !== 'string' || !row.person.trim()) {
+      throw new Error(`Line ${i + 1} must include a non-empty person identifier for signer-independent validation`);
     }
-  } else {
-    const tuck = rng.uniform(-0.04, 0.03);
-    const flatZ = rng.rand() < 0.25 ? 0 : 1; // include flat-z camera/synthetic frames
-    lm[3] = { x: cx - mirror * 0.045, y: cy - 0.12, z: -0.02 * flatZ };
-    lm[4] = { x: cx + mirror * tuck, y: cy - rng.uniform(0.14, 0.17), z: -0.03 * flatZ };
+    if (!Array.isArray(row.landmarks) || row.landmarks.length !== 21 || row.landmarks.some((p) =>
+      !p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || (p.z != null && !Number.isFinite(p.z)))) {
+      throw new Error(`Line ${i + 1} must contain exactly 21 finite hand landmarks`);
+    }
+    const landmarks = row.landmarks.map((p) => ({ x: p.x, y: p.y, z: p.z || 0 }));
+    rows.push({ x: extractFeatures(landmarks), label: row.label, person: row.person.trim() });
   }
 
-  if (pinchIndex) {
-    const px = cx - mirror * 0.04, py = cy - 0.18;
-    lm[4] = { x: px, y: py, z: -0.02 };
-    lm[8] = { x: px + rng.randn() * 0.006, y: py + rng.randn() * 0.006, z: -0.02 };
-    lm[7] = { x: px + mirror * 0.02, y: py - 0.02, z: -0.015 };
-    lm[6] = { x: cx + mirror * xs.index, y: cy - 0.22, z: -0.01 };
-  }
-
-  // Apply 2D in-plane rotation (restricted for THUMBS_UP/THUMBS_DOWN)
-  const maxAngle = (thumbDir === 'up' || thumbDir === 'down') ? 0.35 : 0.65;
-  const ang = rng.uniform(-maxAngle, maxAngle);
-  const cos = Math.cos(ang), sin = Math.sin(ang);
-  const scale = rng.uniform(0.65, 1.45);
-  const tx = rng.uniform(-0.2, 0.2), ty = rng.uniform(-0.2, 0.2);
-
-  return lm.map((pt) => {
-    const dx = (pt.x - cx) * scale;
-    const dy = (pt.y - cy) * scale;
-    return {
-      x: cx + tx + dx * cos - dy * sin + rng.randn() * 0.004,
-      y: cy + ty + dx * sin + dy * cos + rng.randn() * 0.004,
-      z: (pt.z || 0) * scale + rng.randn() * 0.004,
-    };
-  });
-}
-
-function generateDataset(rng, perClass = 300) {
-  const specs = {
-    HELLO:       [{ thumb: 1, index: 1, middle: 1, ring: 1, pinky: 1 }, {}],
-    FIST:        [{}, {}],
-    THUMBS_UP:   [{ thumb: 1 }, { thumbDir: 'up' }],
-    THUMBS_DOWN: [{ thumb: 1 }, { thumbDir: 'down' }],
-    POINT:       [{ index: 1 }, {}],
-    PEACE:       [{ index: 1, middle: 1 }, {}],
-    THREE:       [{ index: 1, middle: 1, ring: 1 }, {}],
-    FOUR:        [{ index: 1, middle: 1, ring: 1, pinky: 1 }, {}],
-    L:           [{ thumb: 1, index: 1 }, {}],
-    OK:          [{ middle: 1, ring: 1, pinky: 1 }, { pinchIndex: true }],
-    HELP:        [{ thumb: 1, pinky: 1 }, {}],
-    ILY:         [{ thumb: 1, index: 1, pinky: 1 }, {}],
+  if (!rows.length) throw new Error('No samples found.');
+  const present = new Set(rows.map((row) => row.label));
+  if (!present.has('NONE')) throw new Error('Training data must include NONE examples of unsupported or ordinary movement.');
+  const classes = CLASSES.filter((label) => present.has(label));
+  if (classes.length < 2) throw new Error('Training data must include at least one registered cue plus NONE.');
+  const classIndex = new Map(classes.map((label, index) => [label, index]));
+  return {
+    classes,
+    samples: rows.map(({ x, label, person }) => ({ x, y: classIndex.get(label), person }))
   };
-
-  const noneConfigs = [
-    { middle: 1 }, { ring: 1 }, { pinky: 1 },
-    { index: 1, ring: 1 }, { middle: 1, ring: 1 }, { middle: 1, pinky: 1 },
-    { ring: 1, pinky: 1 }, { thumb: 1, middle: 1 }, { thumb: 1, ring: 1 },
-    { thumb: 1, middle: 1, ring: 1 }, { index: 1, middle: 1, pinky: 1 },
-    { thumb: 1, index: 1, middle: 1, ring: 1 },
-  ];
-
-  const samples = [];
-  for (const [label, [ext, opts]] of Object.entries(specs)) {
-    for (let i = 0; i < perClass; i++) {
-      samples.push({ x: extractFeatures(synthHand(rng, ext, opts)), y: CLASSES.indexOf(label) });
-    }
-  }
-  const noneIdx = CLASSES.indexOf('NONE');
-  for (let i = 0; i < perClass; i++) {
-    const ext = noneConfigs[i % noneConfigs.length];
-    samples.push({ x: extractFeatures(synthHand(rng, ext, {})), y: noneIdx });
-  }
-  return samples;
 }
 
-// --- Pure-JS MLP Neural Network (75 -> 64 -> 32 -> 13) with Adam ---
+function splitByPerson(samples, classes, rng = makeRng(1337)) {
+  const byPerson = new Map();
+  for (const sample of samples) {
+    if (!byPerson.has(sample.person)) byPerson.set(sample.person, []);
+    byPerson.get(sample.person).push(sample);
+  }
+  const people = [...byPerson.keys()];
+  if (people.length < 2) throw new Error('At least two different people are required for signer-independent validation.');
+
+  const validationCount = Math.max(1, Math.round(people.length * 0.2));
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const shuffled = people.slice();
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rng.rand() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const validationPeople = shuffled.slice(0, validationCount);
+    const validationSet = new Set(validationPeople);
+    const trainRaw = samples.filter((sample) => !validationSet.has(sample.person));
+    const valRaw = samples.filter((sample) => validationSet.has(sample.person));
+    const trainClasses = new Set(trainRaw.map((sample) => sample.y));
+    const valClasses = new Set(valRaw.map((sample) => sample.y));
+    if (classes.every((_, i) => trainClasses.has(i) && valClasses.has(i))) {
+      return {
+        trainRaw,
+        valRaw,
+        trainPeople: people.filter((person) => !validationSet.has(person)),
+        valPeople: validationPeople
+      };
+    }
+  }
+  throw new Error('Could not create a person-disjoint split containing every class. Collect every class from multiple people.');
+}
+
+// --- Pure-JS MLP Neural Network (77 -> 64 -> 32 -> selected classes) with Adam ---
 function createMLP(inDim, h1, h2, outDim, rng) {
   const initLayer = (rows, cols) => {
     const scale = Math.sqrt(2 / rows);
@@ -222,10 +174,10 @@ function forward(layers, x) {
   return acts;
 }
 
-function trainMLP(trainData, valData, { epochs = 60, batchSize = 32, lr = 0.003 } = {}) {
+function trainMLP(trainData, valData, classCount, { epochs = 60, batchSize = 32, lr = 0.003 } = {}) {
   const rng = makeRng(2026);
   const inDim = trainData[0].x.length;
-  const layers = createMLP(inDim, 64, 32, CLASSES.length, rng);
+  const layers = createMLP(inDim, 64, 32, classCount, rng);
   let step = 0;
   const beta1 = 0.9, beta2 = 0.999, eps = 1e-8;
 
@@ -317,38 +269,19 @@ function accuracy(layers, data) {
   return ok / data.length;
 }
 
-function main() {
-  const args = process.argv.slice(2);
+function main(args = process.argv.slice(2)) {
   const dataIdx = args.indexOf('--data');
   const epIdx = args.indexOf('--epochs');
-  const epochs = epIdx >= 0 ? Number(args[epIdx + 1]) || 60 : 60;
+  const file = dataIdx >= 0 ? args[dataIdx + 1] : '';
+  if (!file) throw new Error('Provide real labelled data with --data <path>. Synthetic-only training is disabled.');
+  const epochs = epIdx >= 0 ? Number(args[epIdx + 1]) : 60;
+  if (!Number.isInteger(epochs) || epochs < 1 || epochs > 500) throw new Error('--epochs must be an integer from 1 to 500.');
 
-  const rng = makeRng(1337);
-  let samples = generateDataset(rng, 320);
-
-  if (dataIdx >= 0 && args[dataIdx + 1]) {
-    const file = args[dataIdx + 1];
-    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    let added = 0;
-    for (const line of lines) {
-      const row = JSON.parse(line);
-      const y = CLASSES.indexOf(row.label);
-      if (y >= 0 && Array.isArray(row.landmarks) && row.landmarks.length >= 21) {
-        samples.push({ x: extractFeatures(row.landmarks), y });
-        added++;
-      }
-    }
-    console.log(`Loaded ${added} real samples from ${file}`);
-  }
-
-  // Shuffle & 80/20 split
-  for (let i = samples.length - 1; i > 0; i--) {
-    const j = Math.floor(rng.rand() * (i + 1));
-    [samples[i], samples[j]] = [samples[j], samples[i]];
-  }
-  const split = Math.floor(samples.length * 0.8);
-  const trainRaw = samples.slice(0, split);
-  const valRaw = samples.slice(split);
+  const dataPath = path.resolve(process.env.INIT_CWD || process.cwd(), file);
+  const { samples, classes } = loadSamples(dataPath);
+  const { trainRaw, valRaw, trainPeople, valPeople } = splitByPerson(samples, classes);
+  console.log(`Loaded ${samples.length} real samples from ${dataPath} across ${trainPeople.length + valPeople.length} people.`);
+  if (trainPeople.length + valPeople.length < 5) console.warn('WARNING: fewer than five people; signer-independent results may not generalize.');
 
   // Z-score standardization fitted on training split only
   const dim = trainRaw[0].x.length;
@@ -363,8 +296,8 @@ function main() {
   const trainData = norm(trainRaw);
   const valData = norm(valRaw);
 
-  console.log(`Training MLP (75 -> 64 -> 32 -> 13) on ${trainData.length} samples, validating on ${valData.length}...`);
-  const layers = trainMLP(trainData, valData, { epochs });
+  console.log(`Training MLP (${dim} -> 64 -> 32 -> ${classes.length}) on ${trainData.length} samples; validating on ${valData.length} samples from held-out people...`);
+  const layers = trainMLP(trainData, valData, classes.length, { epochs });
   const valAcc = accuracy(layers, valData);
 
   // Round weights to 5 decimals to keep JSON compact (~180KB)
@@ -373,11 +306,14 @@ function main() {
 
   const model = {
     version: 1,
-    architecture: 'MLP(75->64->32->13, ReLU, Softmax)',
+    architecture: `MLP(${dim}->64->32->${classes.length}, ReLU, Softmax)`,
     trainedAt: new Date().toISOString(),
-    classes: CLASSES,
+    classes,
     featureDim: dim,
     validationAccuracy: Math.round(valAcc * 10000) / 10000,
+    validationMethod: 'person-disjoint',
+    trainingPeople: trainPeople.length,
+    validationPeople: valPeople.length,
     scaler: { mean: roundVec(mean), std: roundVec(std) },
     layers: layers.map(L => ({ W: roundMat(L.W), b: roundVec(L.b) })),
   };
@@ -388,4 +324,12 @@ function main() {
   console.log(`Saved trained model to ${OUT_PATH} and ${jsOutPath} (${(fs.statSync(OUT_PATH).size / 1024).toFixed(1)} KB, val_acc=${(valAcc * 100).toFixed(2)}%)`);
 }
 
-main();
+if (require.main === module) {
+  try { main(); }
+  catch (error) {
+    console.error(`Gesture training failed: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+module.exports = { CLASSES, loadSamples, main, splitByPerson };

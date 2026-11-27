@@ -81,7 +81,6 @@ export function DashboardPage() {
           <span>{lanUrl ? '📶' : '🌐'} <strong>{lanUrl ? 'Students on the same Wi-Fi can open:' : 'Students on any Wi-Fi or network can open:'}</strong></span>
           <code className="text-emerald-300 font-mono bg-slate-950 px-2 py-0.5 rounded">{shareUrl}</code>
           <button type="button" onClick={() => navigator.clipboard?.writeText(shareUrl)} className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold">Copy link</button>
-          {network?.speechEngine?.ready && <span className="ml-auto text-emerald-400">● Offline speech engine ready</span>}
         </p>
       )}
 

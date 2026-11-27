@@ -128,7 +128,7 @@
 
 **"What are the limitations of your project?"**
 
-> 1. **Speech recognition accuracy:** The Web Speech API and Vosk both make mistakes, especially on technical vocabulary. The vocabulary correction feature helps, but is not a complete solution.
+> 1. **Speech recognition accuracy:** The browser's Web Speech API can make mistakes, especially on technical vocabulary. The vocabulary correction feature helps, but is not a complete solution.
 >
 > 2. **Gesture recognition is limited:** The application recognises only 12 predefined hand poses. It is not a sign-language translation system. This is clearly disclosed in the UI.
 >
@@ -204,11 +204,11 @@
 
 **"Why React *and* Next.js?"** — The classroom is an authenticated, real-time single-page app (React + Vite, served by Express). The public site is mostly static content that benefits from Next.js routing, metadata and static generation. Each tool is used where it fits.
 
-**"Is the gesture recognition real?"** — The hand tracking is real (MediaPipe HandLandmarker in the browser). The mapping from landmarks to 12 poses is hand-written geometry, not a trained or validated classifier, and no accuracy is claimed. It is not sign-language translation.
+**"Is the gesture recognition real?"** — The hand tracking runs in the browser with MediaPipe and the live app uses a static MLP classifier for 12 application-defined, one-hand classroom cues. The checked-in model has not been evaluated on real signers, and the cues are not validated ISL signs. It is not sign-language translation.
 
 **"Why fetch + Blob for downloads?"** — Browsers do not send an Authorization header on a normal link, so the JWT would be missing.
 
-**"What did you not verify?"** — Real Vosk recognition, hand-recognition accuracy, live AI providers, the Docker build, Render deployment and screen-reader behaviour (see README → Verification status).
+**"What did you not verify?"** — Hand-recognition accuracy, live AI providers, the Docker build, Render deployment and screen-reader behaviour (see README → Verification status).
 
 **"Why Next.js 14 with known advisories?"** — The fix is a major upgrade to Next 16; the site is static and uses none of the affected features, but it should be upgraded before a public launch.
 

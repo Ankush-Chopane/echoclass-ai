@@ -3,7 +3,6 @@
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const T = require('./text');
-const log = require('./log');
 const { cleanText } = require('./security');
 
 const REQUEST_KINDS = new Set(['raise_hand', 'slow_down', 'repeat', 'louder', 'understood']);
@@ -12,42 +11,13 @@ const SOURCES = { teacher: new Set(['speech', 'typed']), student: new Set(['sign
 const CID = /^[\w-]{6,64}$/;
 const TICKET_TTL_MS = 30_000, MAX_PER_SESSION = 400, MAX_PER_USER = 4;
 
-function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEngine }) {
+function createHub({ db, loadUser, access, server, allowedOrigins = [] }) {
   const rooms = new Map();       // sessionId -> Set<ws>
   const roomVideo = new Map();   // sessionId -> { active: boolean, speaker: string }
   const roomStudentVideos = new Map(); // sessionId -> Map<userId, { userId, name, active }>
+  const roomAudio = new Map();   // sessionId -> { active: boolean, owner: ws | null }
   const tickets = new Map();     // ticket -> { userId, sessionId, exp }
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-  let activeStreamingWs = null;
-
-  if (speechEngine) {
-    speechEngine.on('interim', (text) => {
-      if (activeStreamingWs && activeStreamingWs.readyState === 1) {
-        const textClean = cleanText(text, 600);
-        if (textClean) {
-          const fixed = T.applyVocab(textClean, q.vocab.all(activeStreamingWs.classroomId));
-          broadcast(activeStreamingWs.sid, { type: 'interim', speaker: activeStreamingWs.user.name, source: 'speech', text: fixed });   // the teacher is in the room, so this reaches them too
-        }
-      }
-    });
-
-    speechEngine.on('final', (text) => {
-      if (activeStreamingWs && activeStreamingWs.readyState === 1) {
-        const textClean = cleanText(text, 600);
-        if (textClean) {
-          const s = q.session.get(activeStreamingWs.sid);
-          if (s && !s.ended_at) {
-            publishCaption(s, activeStreamingWs.classroomId, {
-              source: 'speech',
-              speaker: activeStreamingWs.user.name,
-              text: textClean,
-              userId: activeStreamingWs.user.id
-            });
-          }
-        }
-      }
-    });
-  }
   const q = {
     session: db.prepare('SELECT * FROM sessions WHERE id = ?'),
     vocab: db.prepare('SELECT heard, replacement FROM vocab WHERE classroom_id=?'),
@@ -79,6 +49,32 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
   function broadcastToTeachers(sid, msg) {
     const data = JSON.stringify(msg);
     for (const w of rooms.get(sid) || []) if (w.user?.role === 'teacher' && w.readyState === 1) w.send(data);
+  }
+  function audioListeners(sid) {
+    const listeners = new Map();
+    for (const w of rooms.get(sid) || []) {
+      if (w.user?.role === 'student' && w.audioListening) listeners.set(w.user.id, { userId: w.user.id, name: w.user.name });
+    }
+    return [...listeners.values()];
+  }
+  function broadcastAudioListeners(sid) {
+    broadcastToTeachers(sid, { type: 'audio_listeners', listeners: audioListeners(sid) });
+  }
+  function broadcastTeacherAudio(sid, active, speaker) {
+    const owner = roomAudio.get(sid)?.owner || null;
+    for (const w of rooms.get(sid) || []) {
+      if (w.readyState === 1) send(w, { type: 'teacher_audio_state', active, speaker, owned: w === owner });
+    }
+  }
+  function validAudioSignal(signal) {
+    if (!signal || typeof signal !== 'object' || Array.isArray(signal)) return false;
+    if (signal.type === 'offer' || signal.type === 'answer') return typeof signal.sdp === 'string' && signal.sdp.length > 0 && signal.sdp.length <= 16_000;
+    if (signal.type !== 'candidate' || !signal.candidate || typeof signal.candidate !== 'object') return false;
+    const c = signal.candidate;
+    return typeof c.candidate === 'string' && c.candidate.length <= 2048
+      && (c.sdpMid == null || (typeof c.sdpMid === 'string' && c.sdpMid.length <= 256))
+      && (c.sdpMLineIndex == null || (Number.isInteger(c.sdpMLineIndex) && c.sdpMLineIndex >= 0 && c.sdpMLineIndex <= 128))
+      && (c.usernameFragment == null || (typeof c.usernameFragment === 'string' && c.usernameFragment.length <= 256));
   }
   const send = (ws, msg) => { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); };
   const presenceTimers = new Map();
@@ -148,6 +144,10 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
       flags,
       requests: reqCounts(sid),
       video: roomVideo.get(sid) || { active: false, speaker: null },
+      teacherAudioActive: Boolean(roomAudio.get(sid)?.active),
+      teacherAudioOwned: teacher && roomAudio.get(sid)?.owner === ws,
+      audioListening: Boolean(ws.audioListening),
+      audioListeners: teacher ? audioListeners(sid) : undefined,
       studentVideos: teacher ? Array.from(roomStudentVideos.get(sid)?.values() || []) : undefined,
       you: { id: user.id, role: user.role }
     });
@@ -159,7 +159,7 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
       let m; try { m = JSON.parse(raw); } catch { return violation('bad_json'); }
       if (!m || typeof m !== 'object' || typeof m.type !== 'string') return violation('bad_message');
       const now = Date.now();
-      if (m.type !== 'speech_chunk' && m.type !== 'video_frame' && m.type !== 'student_video_frame') {
+      if (m.type !== 'video_frame' && m.type !== 'student_video_frame') {
         while (ws.rate.length && now - ws.rate[0] > 5000) ws.rate.shift();
         if (ws.rate.length >= (teacher ? 120 : 30)) { if (!ws.warned || now - ws.warned > 3000) { ws.warned = now; send(ws, { type: 'error', code: 'rate_limited' }); } return; }
         ws.rate.push(now);
@@ -169,20 +169,44 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
 
       if (m.type === 'ping') return send(ws, { type: 'pong' });
 
-      if (teacher && m.type === 'speech_chunk') {
-        if (typeof m.data !== 'string' || m.data.length > 65536 || !/^[A-Za-z0-9+/]+={0,2}$/.test(m.data)) return violation('bad_audio');
-        if (!speechEngine?.isModelInstalled?.()) { if (!ws.warnedSpeech) { ws.warnedSpeech = true; send(ws, { type: 'error', code: 'offline_speech_unavailable' }); } return; }
-        // One recogniser process serves one class at a time: refuse instead of mixing two teachers' audio.
-        if (activeStreamingWs && activeStreamingWs !== ws && activeStreamingWs.readyState === 1 && activeStreamingWs.sid !== sid) {
-          if (!ws.warnedBusy) { ws.warnedBusy = true; send(ws, { type: 'error', code: 'offline_speech_busy' }); } return;
+      if (teacher && m.type === 'teacher_audio_state') {
+        if (typeof m.active !== 'boolean') return violation('bad_audio_state');
+        const current = roomAudio.get(sid);
+        if (m.active && current?.owner && current.owner !== ws) {
+          return send(ws, { type: 'teacher_audio_state', active: true, speaker: current.owner.user.name, owned: false, error: 'busy' });
         }
-        if (activeStreamingWs !== ws) { activeStreamingWs = ws; speechEngine.reset(); }
-        speechEngine.feedAudio(m.data);
+        if (!m.active && current?.owner && current.owner !== ws) {
+          return send(ws, { type: 'teacher_audio_state', active: true, speaker: current.owner.user.name, owned: false, error: 'not_owner' });
+        }
+        roomAudio.set(sid, { active: m.active, owner: m.active ? ws : null });
+        broadcastTeacherAudio(sid, m.active, m.active ? user.name : null);
         return;
       }
 
-      if (teacher && m.type === 'speech_stop') {
-        speechEngine?.flush();
+      if (!teacher && m.type === 'audio_listen') {
+        if (typeof m.active !== 'boolean') return violation('bad_audio_listen');
+        if (m.active && [...(rooms.get(sid) || [])].some((other) => other !== ws && other.user.id === user.id && other.audioListening)) {
+          return send(ws, { type: 'error', code: 'audio_already_listening' });
+        }
+        ws.audioListening = m.active;
+        send(ws, { type: 'audio_listen_state', active: m.active, teacherAudioActive: Boolean(roomAudio.get(sid)?.active) });
+        broadcastAudioListeners(sid);
+        return;
+      }
+
+      if (m.type === 'audio_signal') {
+        if (!Number.isSafeInteger(m.toUserId) || m.toUserId < 1 || !validAudioSignal(m.signal)) return violation('bad_audio_signal');
+        const audio = roomAudio.get(sid);
+        let target;
+        if (teacher) {
+          if (audio?.owner !== ws || !audio.active || !['offer', 'candidate'].includes(m.signal.type)) return violation('audio_not_enabled');
+          target = [...(rooms.get(sid) || [])].find((other) => other.user.id === m.toUserId && other.user.role === 'student' && other.audioListening);
+          if (!target) return send(ws, { type: 'error', code: 'audio_listener_unavailable' });
+        } else {
+          if (!ws.audioListening || !audio?.active || !audio.owner || !['answer', 'candidate'].includes(m.signal.type) || m.toUserId !== audio.owner.user.id) return violation('audio_not_listening');
+          target = audio.owner;
+        }
+        send(target, { type: 'audio_signal', fromUserId: user.id, signal: m.signal });
         return;
       }
 
@@ -263,9 +287,13 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
     });
 
     ws.on('close', () => {
-      if (activeStreamingWs === ws) {
-        activeStreamingWs = null;
-        speechEngine?.reset();
+      if (ws.audioListening) {
+        ws.audioListening = false;
+        broadcastAudioListeners(sid);
+      }
+      if (roomAudio.get(sid)?.owner === ws) {
+        roomAudio.set(sid, { active: false, owner: null });
+        broadcastTeacherAudio(sid, false, null);
       }
       if (ws.videoActive) {
         roomVideo.set(sid, { active: false, speaker: null });
@@ -276,7 +304,7 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
         broadcastToTeachers(sid, { type: 'student_video_state', userId: user.id, name: user.name, active: false });
       }
       const room = rooms.get(sid); room?.delete(ws);
-      if (room && !room.size) { rooms.delete(sid); roomVideo.delete(sid); roomStudentVideos.delete(sid); } else presence(sid);
+      if (room && !room.size) { rooms.delete(sid); roomVideo.delete(sid); roomStudentVideos.delete(sid); roomAudio.delete(sid); } else presence(sid);
     });
     ws.on('error', () => {});
   });
@@ -286,7 +314,7 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
 
   return {
     issueTicket, publishCaption, broadcast,
-    endSession(sid) { broadcast(sid, { type: 'ended' }); setTimeout(() => (rooms.get(sid) || []).forEach(w => w.close(1000, 'Session ended')), 400).unref(); },
+    endSession(sid) { roomAudio.set(sid, { active: false, owner: null }); broadcastTeacherAudio(sid, false, null); broadcast(sid, { type: 'ended' }); setTimeout(() => (rooms.get(sid) || []).forEach(w => w.close(1000, 'Session ended')), 400).unref(); },
     disconnectUser(userId) { for (const room of rooms.values()) for (const w of room) if (w.user.id === userId) w.close(4001, 'Signed out'); },
     stats: () => ({ rooms: rooms.size, sockets: wss.clients.size }),
     close() { clearInterval(beat); for (const t of presenceTimers.values()) clearTimeout(t); wss.clients.forEach(w => w.close(1001, 'Server restarting')); setTimeout(() => wss.clients.forEach(w => w.terminate()), 1500).unref(); },

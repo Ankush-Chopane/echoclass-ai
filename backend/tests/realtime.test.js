@@ -152,6 +152,44 @@ test('teacher live video: state and JPEG frames relay to students; students cann
   [tw, a, b, late].forEach(w => w.close());
 });
 
+test('teacher audio is opt-in, room-scoped, targeted, and cleared when the teacher disconnects', async () => {
+  const tw = await h.connect(T, sess.id), a = await h.connect(S1, sess.id), b = await h.connect(S2, sess.id);
+  const t2 = await h.connect(h.T2, sess2.id), outsider = await h.connect(X, sess2.id);
+
+  send(tw, { type: 'teacher_audio_state', active: true });
+  await waitFor(() => a.msgs.some(m => m.type === 'teacher_audio_state' && m.active));
+  assert.equal(a.msgs.some(m => m.type === 'audio_signal'), false);
+
+  const late = await h.connect(S2, sess.id);
+  assert.equal(late.msgs.find(m => m.type === 'init').teacherAudioActive, true);
+
+  send(a, { type: 'audio_listen', active: true });
+  await waitFor(() => tw.msgs.some(m => m.type === 'audio_listeners' && m.listeners.some(u => u.userId === S1.user.id)));
+  assert.equal(a.msgs.some(m => m.type === 'audio_listen_state' && m.active), true);
+
+  const offer = { type: 'offer', sdp: 'v=0\r\n' };
+  send(tw, { type: 'audio_signal', toUserId: S1.user.id, signal: offer });
+  await waitFor(() => a.msgs.some(m => m.type === 'audio_signal' && m.signal.type === 'offer'));
+  assert.equal(b.msgs.some(m => m.type === 'audio_signal'), false);
+  assert.equal(outsider.msgs.some(m => m.type === 'audio_signal'), false);
+  assert.equal(t2.msgs.some(m => m.type === 'audio_signal'), false);
+
+  send(tw, { type: 'audio_signal', toUserId: S2.user.id, signal: offer });
+  await waitFor(() => tw.msgs.some(m => m.type === 'error' && m.code === 'audio_listener_unavailable'));
+  send(a, { type: 'audio_signal', toUserId: T.user.id, signal: { type: 'answer', sdp: 'v=0\r\n' } });
+  await waitFor(() => tw.msgs.some(m => m.type === 'audio_signal' && m.fromUserId === S1.user.id && m.signal.type === 'answer'));
+
+  send(b, { type: 'audio_signal', toUserId: T.user.id, signal: { type: 'answer', sdp: 'v=0\r\n' } });
+  send(b, { type: 'teacher_audio_state', active: true });
+  await waitFor(() => b.msgs.some(m => m.type === 'error' && m.code === 'audio_not_listening')
+    && b.msgs.some(m => m.type === 'error' && m.code === 'not_allowed'));
+
+  const cleanupCount = a.msgs.filter(m => m.type === 'teacher_audio_state' && !m.active).length;
+  tw.close();
+  await waitFor(() => a.msgs.filter(m => m.type === 'teacher_audio_state' && !m.active).length > cleanupCount);
+  [a, b, late, t2, outsider].forEach(w => w.close());
+});
+
 test('ending a lesson notifies and closes sockets; ended lessons refuse new connections and messages', async () => {
   const tw = await h.connect(T, sess.id), a = await h.connect(S1, sess.id);
   const closed = new Promise(r => a.on('close', c => r(c)));

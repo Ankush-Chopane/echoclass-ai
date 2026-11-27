@@ -11,8 +11,8 @@
     "backup": "node scripts/backup.js",
     "docs:gestures": "node scripts/gen-gesture-docs.js",
     "eval:gestures": "node scripts/eval-gestures.js",
+    "train:gestures": "node scripts/train-gestures.js",
     "fetch-model": "node scripts/fetch-model.js",
-    "fetch-speech-model": "node scripts/fetch-speech-model.js",
     "gen-cert": "node scripts/gen-cert.js",
     "preflight": "node scripts/preflight.js"
   },

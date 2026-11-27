@@ -4,8 +4,8 @@ import { useAuth } from '../hooks/useAuth';
 import { useAccessibility } from '../hooks/useAccessibility';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
-import { useOfflineSpeech } from '../hooks/useOfflineSpeech';
 import { useTeacherVideo } from '../hooks/useTeacherVideo';
+import { useClassAudio } from '../hooks/useClassAudio';
 import { api } from '../services/api';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
@@ -18,10 +18,9 @@ const CONNECTION = {
 };
 const NOTICES = {
   rate_limited: 'You are sending too fast. Slow down a little.',
-  offline_speech_unavailable: 'The offline speech engine is not installed on this server, so nothing is being recognised. Switch to browser speech or type captions.',
-  offline_speech_busy: 'Another class is already using the offline speech engine. Switch to browser speech for now.',
-  bad_audio: 'The server rejected the audio it received.',
-  bad_caption: 'That message was rejected by the server.'
+  bad_caption: 'That message was rejected by the server.',
+  audio_already_listening: 'Live audio is already enabled on another device for your account.',
+  audio_listener_unavailable: 'A student who opted in is no longer connected. Live audio will continue for the others.'
 };
 const ENGINE_STATE = { off: 'Microphone off', starting: 'Starting microphone…', listening: 'Listening', retrying: 'Reconnecting speech service…', blocked: 'Microphone blocked', error: 'Speech stopped' };
 
@@ -35,10 +34,8 @@ export function LiveClassroomPage() {
   const [sessionId, setSessionId] = useState(null);
   const [waitingLive, setWaitingLive] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [config, setConfig] = useState(null);
 
   const [language, setLanguage] = useState('en-IN');
-  const [engine, setEngine] = useState('browser');             // browser | offline
   const [typed, setTyped] = useState('');
   const [localInterim, setLocalInterim] = useState('');
   const [flash, setFlash] = useState('');
@@ -54,9 +51,9 @@ export function LiveClassroomPage() {
     let timer = null;
     async function check() {
       try {
-        const [cls, cfg] = await Promise.all([api.getClassroom(id), api.getConfig()]);
+        const cls = await api.getClassroom(id);
         if (cancelled) return;
-        setClassroom(cls); setConfig(cfg); setLanguage(cls.language || 'en-IN');
+        setClassroom(cls); setLanguage(cls.language || 'en-IN');
         if (cls.live) { setWaitingLive(false); setSessionId(cls.live.id); }
         else {
           setWaitingLive(true);
@@ -69,30 +66,41 @@ export function LiveClassroomPage() {
   }, [id]);
 
   const ws = useWebSocket(sessionId);
-  const { captions, interim, presence, flags, requests, teacherVideo, studentVideos, status, notice, failure, sendCaption, sendFlag, sendRequest, sendRaw } = ws;
+  const { captions, interim, presence, flags, requests, studentAlerts, teacherVideo, studentVideos, teacherAudioActive, teacherAudioOwned, teacherAudioError, audioListening, audioListeners, status, notice, failure, sendCaption, sendFlag, sendRequest, sendRaw, clearTeacherAudioError } = ws;
 
   // When the lecture ends (teacher pressed End, or it ended elsewhere) everyone is taken to the saved transcript.
   useEffect(() => { if (status === 'ended' && sessionId) { const t = setTimeout(() => navigate(`/transcripts/${sessionId}`, { replace: true }), 1500); return () => clearTimeout(t); } return undefined; }, [status, sessionId, navigate]);
 
-  // 2) Teacher speech: browser engine (Web Speech API) or the server's offline Vosk engine.
+  // 2) Teacher speech captions use the browser's Web Speech API.
   const browserMic = useSpeechRecognition({
     lang: language,
     onInterim: (t) => { setLocalInterim(t); if (t) sendCaption({ text: t.slice(-500), final: false, source: 'speech' }); },
     onFinal: (t) => { setLocalInterim(''); if (!sendCaption({ text: t, final: true, source: 'speech' })) setFlash('Too many unsent captions; check your connection.'); }
   });
-  const offlineAvailable = Boolean(config?.offlineSpeech?.available);
-  const offlineMic = useOfflineSpeech({ send: sendRaw, available: offlineAvailable });
-  const mic = engine === 'offline' ? offlineMic : browserMic;
-  const micOn = mic.listening;
+  const mic = browserMic;
+  const micOn = browserMic.listening;
   const teacherCam = useTeacherVideo({ sendRaw });
-  const stopAll = useCallback(() => { browserMic.stop(); offlineMic.stop(); teacherCam.stop(); }, [browserMic, offlineMic, teacherCam]);
+  const classAudio = useClassAudio({
+    isTeacher,
+    connected: ws.connected,
+    ended: ws.ended || status === 'failed',
+    sendRaw,
+    clearTeacherAudioError,
+    subscribeAudioSignals: ws.subscribeAudioSignals,
+    teacherAudioActive,
+    teacherAudioOwned,
+    teacherAudioError,
+    audioListening,
+    audioListeners
+  });
+  const stopAll = useCallback(() => { browserMic.stop(); teacherCam.stop(); classAudio.stopTeacherAudio(); }, [browserMic, teacherCam, classAudio.stopTeacherAudio]);
 
   useEffect(() => {
     if (!isTeacher) return undefined;
-    const warn = (e) => { if (micOn || teacherCam.active) { e.preventDefault(); e.returnValue = ''; } };
+    const warn = (e) => { if (micOn || teacherCam.active || classAudio.teacherStatus === 'on') { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [isTeacher, micOn, teacherCam.active]);
+  }, [isTeacher, micOn, teacherCam.active, classAudio.teacherStatus]);
   useEffect(() => { if (status === 'ended' || status === 'failed') stopAll(); }, [status, stopAll]);
 
   // 3) Auto-scroll only while the reader is at the bottom (never yank the view away from someone re-reading).
@@ -161,6 +169,36 @@ export function LiveClassroomPage() {
       </header>
 
       <div className="sr-only" role="status" aria-live="polite">{`Connection: ${badgeLabel}`}</div>
+      {isTeacher && studentAlerts.length > 0 && (
+        <aside className="fixed top-20 right-3 z-50 w-[calc(100vw-1.5rem)] sm:w-[min(26rem,calc(100vw-2rem))] max-h-[60vh] overflow-y-auto flex flex-col gap-2" aria-label="New student messages and requests">
+          {studentAlerts.slice(-5).reverse().map((alert) => {
+            const requestLabel = REQUEST_BUTTONS.find(([kind]) => kind === alert.request)?.[2];
+            const isRequest = alert.kind === 'request';
+            return (
+              <section key={alert.id} role="alert" className="rounded-xl border-2 border-amber-400 bg-slate-950 shadow-2xl shadow-black/50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-amber-200">
+                      {isRequest ? `Student request · ${alert.speaker}` : `Student message · ${alert.speaker}`}
+                    </p>
+                    <p className="mt-1 text-sm text-white break-words">
+                      {isRequest ? requestLabel || 'Needs your attention' : alert.text}
+                      {!isRequest && alert.source === 'sign' && <span className="ml-1 text-xs text-purple-300">(hand gesture)</span>}
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => ws.dismissStudentAlert(alert.id)} aria-label="Dismiss student alert" className="shrink-0 rounded px-2 py-1 text-slate-300 hover:bg-slate-800 hover:text-white">✕</button>
+                </div>
+                {micOn
+                  ? <p role="status" className="mt-2 text-xs text-emerald-200">Microphone is on — speak your reply.</p>
+                  : <Button size="sm" className="mt-2" onClick={() => mic.start()} disabled={readOnly}>🎙 Start microphone to reply</Button>}
+              </section>
+            );
+          })}
+          {studentAlerts.length > 1 && (
+            <Button size="sm" variant="secondary" className="self-end" onClick={ws.clearStudentAlerts}>Dismiss all alerts</Button>
+          )}
+        </aside>
+      )}
       {failure && <div role="alert" className="p-3 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-sm">{failure}</div>}
       {status === 'ended' && <div role="status" className="p-3 rounded-lg border border-slate-700 bg-slate-900 text-sm">This lecture has ended. Opening the transcript…</div>}
       {status === 'reconnecting' && <div role="status" className="p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm">Connection lost. Reconnecting… {isTeacher ? 'Captions you speak meanwhile are kept and sent when the connection returns.' : ''}</div>}
@@ -316,27 +354,19 @@ export function LiveClassroomPage() {
               <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-3" aria-labelledby="mic-h">
                 <h2 id="mic-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">Teacher camera &amp; microphone</h2>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant={micOn ? 'danger' : 'primary'} onClick={micOn ? mic.stop : mic.start} aria-pressed={micOn} disabled={readOnly || (engine === 'browser' && !browserMic.supported)}>
+                  <Button variant={micOn ? 'danger' : 'primary'} onClick={micOn ? mic.stop : mic.start} aria-pressed={micOn} disabled={readOnly || !browserMic.supported}>
                     {micOn ? '■ Stop microphone' : '🎙 Start microphone'}
                   </Button>
                   <Button variant={teacherCam.active ? 'danger' : 'secondary'} onClick={teacherCam.active ? teacherCam.stop : teacherCam.start} aria-pressed={teacherCam.active} disabled={readOnly || teacherCam.status === 'starting'}>
                     {teacherCam.active ? '📹 Turn off video' : teacherCam.status === 'starting' ? 'Starting camera…' : '📹 Turn on video'}
                   </Button>
                 </div>
-                <span className="text-xs text-slate-300" role="status" aria-live="polite">{engine === 'browser' ? ENGINE_STATE[browserMic.state] : (offlineMic.state === 'listening' ? 'Listening (offline engine)' : offlineMic.state === 'starting' ? 'Starting microphone…' : offlineMic.state === 'error' ? 'Offline engine stopped' : 'Microphone off')}{teacherCam.active ? ' · Video on' : ''}</span>
+                <span className="text-xs text-slate-300" role="status" aria-live="polite">{ENGINE_STATE[browserMic.state]}{teacherCam.active ? ' · Video on' : ''}</span>
                 {teacherCam.error && <p role="alert" className="text-xs text-rose-300">{teacherCam.error}</p>}
                 {mic.message && <p role="alert" className="text-xs text-amber-300">{mic.message}</p>}
-                {engine === 'browser' && !browserMic.supported && <p className="text-xs text-amber-300">This browser has no speech recognition (Firefox). Use Chrome, Edge or Safari, choose the offline engine, or type captions below.</p>}
+                {!browserMic.supported && <p className="text-xs text-amber-300">This browser does not support speech recognition. Use Chrome, Edge or Safari, or type captions below.</p>}
 
-                <div>
-                  <label htmlFor="engine" className="text-xs text-slate-400 block mb-1">Speech engine</label>
-                  <select id="engine" value={engine} disabled={micOn} onChange={(e) => setEngine(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200">
-                    <option value="browser">Browser speech recognition (needs internet in most browsers)</option>
-                    <option value="offline" disabled={!offlineAvailable}>Offline engine (Vosk on this server){offlineAvailable ? '' : ' – not installed'}</option>
-                  </select>
-                  {!offlineAvailable && <p className="text-[11px] text-slate-400 mt-1">To enable offline recognition: <code>pip install vosk</code> then <code>npm run fetch-speech-model</code>, and restart the server.</p>}
-                </div>
-                {engine === 'browser' && (
+                {browserMic.supported && (
                   <div>
                     <label htmlFor="lang" className="text-xs text-slate-400 block mb-1">Speaking language</label>
                     <select id="lang" value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200">
@@ -351,6 +381,23 @@ export function LiveClassroomPage() {
                 </form>
               </section>
 
+              <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-3" aria-labelledby="audio-h">
+                <h2 id="audio-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">Optional live teacher audio</h2>
+                <p className="text-xs text-slate-400">Students must choose to listen. Audio is streamed live and is not recorded.</p>
+                <Button
+                  variant={classAudio.teacherStatus === 'on' ? 'danger' : 'secondary'}
+                  onClick={classAudio.teacherStatus === 'on' ? classAudio.stopTeacherAudio : classAudio.startTeacherAudio}
+                  aria-pressed={teacherAudioActive && teacherAudioOwned}
+                  disabled={readOnly || !ws.connected || classAudio.teacherStatus === 'starting'}
+                >
+                  {classAudio.teacherStatus === 'on' ? '■ Stop sharing live audio' : classAudio.teacherStatus === 'starting' ? 'Starting live audio…' : 'Enable live audio for students'}
+                </Button>
+                <p className="text-xs text-slate-300" role="status" aria-live="polite">
+                  {classAudio.teacherStatus === 'on' && teacherAudioOwned ? `Sharing · ${classAudio.teacherListeningCount} ${classAudio.teacherListeningCount === 1 ? 'student' : 'students'} opted in` : teacherAudioActive ? 'Another teacher device is sharing live audio.' : 'Live audio is off.'}
+                </p>
+                {classAudio.teacherError && <p role="alert" className="text-xs text-rose-300">{classAudio.teacherError}</p>}
+              </section>
+
               <section className="p-4 rounded-xl bg-slate-900 border border-slate-800" aria-labelledby="req-h">
                 <h2 id="req-h" className="text-xs font-bold uppercase tracking-wider text-slate-300 mb-2">Student requests</h2>
                 <ul className="divide-y divide-slate-800">
@@ -362,6 +409,21 @@ export function LiveClassroomPage() {
             </>
           ) : (
             <>
+              <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-3" aria-labelledby="listen-h">
+                <h2 id="listen-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">Listen to your teacher</h2>
+                <p className="text-xs text-slate-400">This is optional and separate from captions. Live audio is not recorded.</p>
+                <Button
+                  variant={audioListening ? 'primary' : 'secondary'}
+                  onClick={() => classAudio.listen(!audioListening)}
+                  aria-pressed={audioListening}
+                  disabled={readOnly || !ws.connected || (!audioListening && !teacherAudioActive)}
+                >
+                  {audioListening ? 'Turn off listening' : teacherAudioActive ? 'Listen to teacher' : 'Teacher audio is off'}
+                </Button>
+                <audio ref={classAudio.audioRef} autoPlay controls onPlay={classAudio.playbackStarted} className={audioListening && teacherAudioActive ? 'w-full' : 'hidden'} aria-label="Teacher live audio" />
+                {classAudio.playbackBlocked && <p role="status" className="text-xs text-amber-200">Playback was blocked. Press play in the audio controls to listen.</p>}
+                {classAudio.studentError && <p role="alert" className="text-xs text-rose-300">{classAudio.studentError}</p>}
+              </section>
               <section className="p-4 rounded-xl bg-slate-900 border border-slate-800" aria-labelledby="tell-h">
                 <h2 id="tell-h" className="text-xs font-bold uppercase tracking-wider text-slate-300 mb-2">Tell your teacher</h2>
                 <div className="grid grid-cols-2 gap-2">

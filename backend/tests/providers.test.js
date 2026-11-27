@@ -50,6 +50,7 @@ test('configuration is validated: provider needs key and model', async () => {
   const { load } = require('../src/config');
   assert.throws(() => load({ AI_PROVIDER: 'anthropic' }), /AI_API_KEY[\s\S]*AI_MODEL/);
   assert.throws(() => load({ AI_PROVIDER: 'nope' }), /AI_PROVIDER must be/);
+  assert.throws(() => load({ TRANSCRIPTION_PROVIDER: 'vosk' }), /TRANSCRIPTION_PROVIDER must be one of: none, openai/);
   assert.throws(() => load({ NODE_ENV: 'production', JWT_SECRET: 'x'.repeat(40), TEACHER_INVITE_CODE: 'invite-123', AI_PROVIDER: 'openai', AI_API_KEY: 'k', AI_MODEL: 'm', AI_BASE_URL: 'http://insecure.example' }), /https/);
 });
 

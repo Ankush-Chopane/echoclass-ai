@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 /**
- * EchoClass AI – Pre-flight Validation for Offline Classroom Mode.
- * Validates dependencies, models, database paths, and reports network addresses.
+ * EchoClass AI pre-flight validation.
+ * Checks required dependencies, model files, database paths, and network addresses.
  */
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawnSync } = require('child_process');
 
 console.log('\n===============================================================');
-console.log('       EchoClass AI – Offline Classroom Pre-flight Check');
+console.log('          EchoClass AI – Pre-flight Check');
 console.log('===============================================================\n');
 
 let allGood = true;
@@ -45,30 +44,7 @@ if (fs.existsSync(handModel) && fs.statSync(handModel).size > 1e6) {
   console.log(`       Run: npm run fetch-model`);
 }
 
-// 4. Offline Speech Recognition (Vosk) model check
-const voskDir = path.resolve(process.env.VOSK_MODEL_PATH || path.join(__dirname, '..', '..', 'models', 'vosk'));
-const hasVoskModel = fs.existsSync(path.join(voskDir, 'am', 'final.mdl')) || fs.existsSync(path.join(voskDir, 'conf', 'model.conf'));
-if (hasVoskModel) {
-  console.log(`[OK] Offline Vosk speech model present: ${voskDir}`);
-} else {
-  console.log(`[WARN] Offline Vosk speech model not found at ${voskDir}`);
-  console.log(`       Run: npm run fetch-speech-model`);
-}
-
-// 5. Python & Vosk package check
-try {
-  const py = spawnSync(process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3'), ['-c', 'import vosk; print("vosk-ok")'], { encoding: 'utf-8' });
-  if (py.status === 0 && py.stdout.includes('vosk-ok')) {
-    console.log(`[OK] Python 3 + Vosk engine available.`);
-  } else {
-    console.log(`[INFO] Python 'vosk' package not detected in current environment.`);
-    console.log(`       To enable local streaming speech recognition, run: pip install vosk`);
-  }
-} catch {
-  console.log(`[INFO] Python not found on PATH. Browser Web Speech API fallback will be available.`);
-}
-
-// 6. Network interfaces
+// 4. Network interfaces
 console.log('\n--- Classroom Network Connectivity ---');
 const ifaces = os.networkInterfaces();
 const localIps = [];

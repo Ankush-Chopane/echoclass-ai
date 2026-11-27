@@ -14,11 +14,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "Hello" |
 | Also notifies teacher | — |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | All five digits extended, any orientation. |
 | Limitations | Easily triggered by an open hand while talking or waving; needs a held pose. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Closed fist — `FIST`
 
@@ -26,11 +26,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "Yes" |
 | Also notifies teacher | — |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | No finger extended; thumb tucked or resting on the side (not vertical). |
 | Limitations | A resting hand can look like a fist; thumb-up/down are checked first. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Thumbs up — `THUMBS_UP`
 
@@ -38,11 +38,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "I understand" |
 | Also notifies teacher | `understood` |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Only the thumb extended and pointing clearly upward in the image. |
 | Limitations | Uses image-up, so a sideways camera or a strongly rotated hand can misread. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Thumbs down — `THUMBS_DOWN`
 
@@ -50,11 +50,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "I don't understand" |
 | Also notifies teacher | `repeat` |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Only the thumb extended and pointing clearly downward in the image. |
 | Limitations | Same image-orientation dependence as thumbs up. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Index finger up — `POINT`
 
@@ -62,11 +62,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "I have a question" |
 | Also notifies teacher | `raise_hand` |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Only the index finger extended. |
 | Limitations | Pointing at something on screen looks identical. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Two fingers (V) — `PEACE`
 
@@ -74,11 +74,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "Please repeat that" |
 | Also notifies teacher | `repeat` |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Index and middle extended; ring, pinky and thumb folded. |
 | Limitations | Ring finger half-folded can read as three fingers. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Three fingers (W) — `THREE`
 
@@ -86,11 +86,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "Please slow down" |
 | Also notifies teacher | `slow_down` |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Index, middle and ring extended; pinky and thumb folded. |
 | Limitations | Pinky half-folded can read as four fingers. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Four fingers — `FOUR`
 
@@ -98,11 +98,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "Wait, please" |
 | Also notifies teacher | — |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Index to pinky extended; thumb folded across the palm. |
 | Limitations | A relaxed thumb can read as an open hand. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### L shape — `L`
 
@@ -110,11 +110,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "Please speak louder" |
 | Also notifies teacher | `louder` |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Thumb and index extended; the other three folded. |
 | Limitations | Thumb-out detection is the least reliable measurement. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### OK sign — `OK`
 
@@ -122,11 +122,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "Okay" |
 | Also notifies teacher | — |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Thumb tip touching index tip; middle, ring and pinky extended. |
 | Limitations | Needs the thumb/index contact visible to the camera. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Thumb + pinky (Y) — `HELP`
 
@@ -134,11 +134,11 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "I need help" |
 | Also notifies teacher | `raise_hand` |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Thumb and pinky extended; index, middle, ring folded. |
 | Limitations | Same shape as the ASL letter Y and the informal "call me" gesture; here it only means what the table says. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |
 
 ### Thumb, index, pinky — `ILY`
 
@@ -146,8 +146,8 @@ Thresholds: `{"finger":1.5,"fingerBand":0.35,"thumb":0.62,"thumbBand":0.25,"pinc
 |---|---|
 | Default caption | "Thank you" |
 | Also notifies teacher | — |
-| Recognition method | Rule-based geometry on MediaPipe hand landmarks (finger extension ratios, thumb distance, pinch distance) |
+| Recognition method | Static single-hand pose classification from MediaPipe landmarks (MLP in the live app; geometric classifier is available as a baseline) |
 | Required hand configuration | Thumb, index and pinky extended; middle and ring folded. |
 | Limitations | This shape is the ASL "I love you" sign. Mapping it to "Thank you" is a classroom convention, not a sign-language rule – rename it in the app if that confuses your class. |
 | Language context | Application-defined classroom convention; not a validated sign |
-| Test examples | `apps/backend/tests/gestures.test.js` (synthetic landmarks only) |
+| Test examples | `backend/tests/gestures.test.js` (synthetic landmarks only) |

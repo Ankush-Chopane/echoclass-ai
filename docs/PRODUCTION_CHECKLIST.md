@@ -16,6 +16,8 @@ Tick each item yourself; nothing below was verified against a live deployment by
 
 **Platform**
 - [ ] HTTPS enforced (microphone/camera need it); WebSocket upgrade on `/ws` works through your proxy
+- [ ] Test optional live teacher audio on the intended school network; configure a school-managed TURN server if peers must connect across network boundaries
+- [ ] Confirm students are told audio is optional and is streamed live without being recorded
 - [ ] `/health` monitored; logs collected
 - [ ] Single instance only (rate limits and WebSocket rooms are in memory)
 - [ ] Hand model self-hosted (`npm run fetch-model`) if students' networks block Google storage

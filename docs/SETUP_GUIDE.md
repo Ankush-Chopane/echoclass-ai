@@ -1,7 +1,7 @@
 # Setup Guide — EchoClass AI
 
 ## Prerequisites
-Node.js >= 22.12, npm >= 10. Python >= 3.8 only for offline Vosk speech. Chromium/Chrome for `npm run e2e`.
+Node.js >= 22.12, npm >= 10. Chromium/Chrome for `npm run e2e`.
 
 ## 1. Install
 ```bash
@@ -18,7 +18,6 @@ Generate a secret: `openssl rand -hex 32`.
 ## 3. Models (optional but recommended)
 ```bash
 npm run fetch-model            # MediaPipe hand model; otherwise loaded from Google's CDN at runtime
-npm run fetch-speech-model     # Vosk model for offline speech (also: pip install vosk)
 ```
 
 ## 4. Run
@@ -46,6 +45,6 @@ See README → Deployment (Docker Compose, Render blueprint). Always mount persi
 |---|---|
 | "Frontend not built" page (503) | Run `npm run build:classroom` |
 | Server refuses to start in production | The message lists missing `JWT_SECRET` / `TEACHER_INVITE_CODE` / https `AI_BASE_URL` |
-| Offline speech "unavailable" | No Vosk model in `models/vosk` or `pip install vosk` missing |
+| Teacher speech captions do not appear | Use a browser that supports Web Speech API (Chrome, Edge, or Safari), allow microphone access, and check internet access |
 | Camera panel "model not loaded" | Run `npm run fetch-model` or allow access to Google's CDN |
 | Data lost after redeploy | Database not on a persistent disk |

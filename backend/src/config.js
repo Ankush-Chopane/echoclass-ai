@@ -54,14 +54,10 @@ function load(env = process.env, { warn = () => {} } = {}) {
     keyPath: path.resolve(env.HTTPS_KEY_PATH || path.join(ROOT, 'data', 'certs', 'server.key')),
     certPath: path.resolve(env.HTTPS_CERT_PATH || path.join(ROOT, 'data', 'certs', 'server.crt'))
   };
-  cfg.voskModelPath = path.resolve(env.VOSK_MODEL_PATH || path.join(ROOT, 'models', 'vosk'));
-  cfg.pythonPath = env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
-
   const provider = (name, allowed, base) => {
     const p = (env[name + '_PROVIDER'] || 'none').toLowerCase();
     if (p === 'none') return { provider: 'none' };
     if (!allowed.includes(p)) { problems.push(`${name}_PROVIDER must be one of: none, ${allowed.join(', ')}`); return { provider: 'none' }; }
-    if (p === 'vosk') return { provider: 'vosk', modelPath: cfg.voskModelPath, pythonPath: cfg.pythonPath };
     if (p === 'local') return { provider: 'local', model: env[name + '_MODEL'] || 'echoclass-nlp-v1' };
     const o = { provider: p, apiKey: env[name + '_API_KEY'], model: env[name + '_MODEL'], baseUrl: (env[name + '_BASE_URL'] || base[p]).replace(/\/+$/, '') };
     if (!o.apiKey) problems.push(`${name}_API_KEY is required when ${name}_PROVIDER=${p}`);
@@ -74,7 +70,7 @@ function load(env = process.env, { warn = () => {} } = {}) {
     maxInputChars: int(env, 'AI_MAX_INPUT_CHARS', 24000, { min: 1000, max: 200000 }, problems),
     timeoutMs: int(env, 'AI_TIMEOUT_MS', 30000, { min: 1000, max: 120000 }, problems),
     dailyLimit: int(env, 'AI_DAILY_LIMIT', 200, { min: 1, max: 100000 }, problems) };
-  cfg.transcription = { ...provider('TRANSCRIPTION', ['openai', 'vosk'], { openai: 'https://api.openai.com/v1' }),
+  cfg.transcription = { ...provider('TRANSCRIPTION', ['openai'], { openai: 'https://api.openai.com/v1' }),
     maxBytes: int(env, 'TRANSCRIPTION_MAX_BYTES', 2 * 1024 * 1024, { min: 10000, max: 25 * 1024 * 1024 }, problems),
     maxSeconds: int(env, 'TRANSCRIPTION_MAX_SECONDS', 30, { min: 1, max: 300 }, problems),
     timeoutMs: int(env, 'TRANSCRIPTION_TIMEOUT_MS', 20000, { min: 1000, max: 120000 }, problems) };

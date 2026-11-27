@@ -13,7 +13,6 @@ const { createHub } = require('./realtime');
 const { createSummarizer, AiError } = require('./ai');
 const { createTranscriber, TranscribeError } = require('./transcribe');
 const { purgeExpired } = require('./retention');
-const { createSpeechEngine } = require('./speech-engine');
 const os = require('os');
 const pkg = require('../package.json');
 
@@ -23,7 +22,7 @@ const RETENTION_CHOICES = [0, 30, 90, 180, 365];
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password-1', 10);
 const intParam = (v, def, min, max) => { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : def; };
 
-function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine: injectedEngine } = {}) {
+function createApp(config, { fetch: fetchImpl, limits = {}, mount } = {}) {
   const cfg = config;
   const db = open(cfg.databasePath);
   const app = express();
@@ -32,7 +31,6 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
 
   const summarizer = createSummarizer(cfg.ai, fetchImpl);
   const transcriber = createTranscriber(cfg.transcription, fetchImpl);
-  const speechEngine = injectedEngine || createSpeechEngine({ modelPath: cfg.voskModelPath, pythonPath: cfg.pythonPath });
 
   // ---------- prepared statements ----------
   const q = {
@@ -97,7 +95,7 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
   const idParam = (req) => { const n = Number(req.params.id); return Number.isSafeInteger(n) && n > 0 ? n : 0; };
 
   const server = http.createServer(app);
-  const hub = createHub({ db, loadUser, access, server, allowedOrigins: cfg.allowedOrigins, speechEngine });
+  const hub = createHub({ db, loadUser, access, server, allowedOrigins: cfg.allowedOrigins });
 
   // ---------- health + public config ----------
   app.get('/health', (req, res) => {
@@ -107,7 +105,6 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
   app.get('/api/config', (req, res) => res.json({
     languages: LANGS, teacherInviteRequired: !!cfg.teacherInviteCode, teacherSignupOpen: cfg.allowOpenTeacherSignup, passwordMinLength: 6,
     aiSummaries: summarizer.enabled, serverTranscription: transcriber.enabled, retentionChoices: RETENTION_CHOICES, defaultRetentionDays: cfg.defaultRetentionDays,
-    offlineSpeech: speechEngine.publicStatus(),
   }));
   // LAN addresses are only useful to (and only shown to) a signed-in teacher who is setting up the classroom.
   app.get('/api/system/network', auth, teacherOnly, (req, res) => {
@@ -128,8 +125,7 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
       port: cfg.port,
       host: cfg.host,
       https: cfg.https?.enabled || false,
-      httpsPort: cfg.https?.port || 3443,
-      speechEngine: speechEngine.publicStatus()
+      httpsPort: cfg.https?.port || 3443
     });
   });
 
@@ -475,12 +471,11 @@ function createApp(config, { fetch: fetchImpl, limits = {}, mount, speechEngine:
   const close = () => new Promise((resolve) => {
     if (closed) return resolve(); closed = true;
     clearInterval(purgeTimer); [apiLimit, registerLimit, loginLimit, joinLimit, aiLimit, trLimit].forEach(l => l.stop());
-    try { speechEngine.close(); } catch { /* ignore */ }
     hub.close();
     const done = () => { try { db.close(); } catch { /* already closed */ } resolve(); };
     if (!server.listening) return done();
     server.close(done); server.closeIdleConnections?.(); setTimeout(() => { server.closeAllConnections?.(); }, 2000).unref();
   });
-  return { app, server, db, hub, speechEngine, close, config: cfg, purge: () => purgeExpired(db, cfg.defaultRetentionDays) };
+  return { app, server, db, hub, close, config: cfg, purge: () => purgeExpired(db, cfg.defaultRetentionDays) };
 }
 module.exports = { createApp };

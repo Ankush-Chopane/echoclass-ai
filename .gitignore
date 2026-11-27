@@ -7,7 +7,6 @@ backups/
 .env
 .env.*
 !.env.example
-models/vosk/
 frontend/public/models/*.task
 backend/certs/
 certs/

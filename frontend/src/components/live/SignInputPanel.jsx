@@ -83,7 +83,7 @@ export function SignInputPanel({ onSend, onRequest, sendRaw, disabled = false, c
     else {
       handText = 'Hand detected';
       const confText = ev.model === 'mlp' && typeof ev.confidence === 'number'
-        ? `${Math.round(ev.confidence * 100)}% confidence`
+        ? `${Math.round(ev.confidence * 100)}% model score (uncalibrated)`
         : (ev.clarity >= 0.5 ? 'clear' : 'fairly clear');
       signText = ev.status === 'recognised' ? `${current.label} (${confText}) – hold still`
         : ev.status === 'borderline' ? `Looks like ${current.label} (${confText}), adjust your hand`
@@ -99,7 +99,7 @@ export function SignInputPanel({ onSend, onRequest, sendRaw, disabled = false, c
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <h3 id="sign-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">Respond to the class</h3>
-          <p className="text-[11px] text-slate-400">MediaPipe HandLandmarker + EchoClass MLP Neural Network run in your browser. Your teacher can see your camera tile while your camera is on.</p>
+          <p className="text-[11px] text-slate-400">This recognizes 12 fixed one-hand classroom poses, not ISL. The model has not been validated with ISL signers; use quick phrases or typing if it gets a gesture wrong. Recognition runs in your browser. Your teacher can see your camera tile while your camera is on.</p>
         </div>
         <Button variant={t.running ? 'danger' : 'secondary'} size="sm" className="shrink-0" onClick={t.running ? t.stop : t.start} disabled={disabled || t.status === 'starting' || t.status === 'loading-model'}>
           {t.running ? 'Turn off camera' : '📷 Turn on camera'}

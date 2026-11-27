@@ -1,11 +1,11 @@
 @echo off
 setlocal
-title EchoClass AI - Offline Classroom Server
+title EchoClass AI - Classroom Server
 
 cd /d "%~dp0"
 
 echo ===============================================================
-echo   Starting EchoClass AI Offline Classroom Assistant...
+echo   Starting EchoClass AI Classroom Assistant...
 echo ===============================================================
 
 REM Run preflight check

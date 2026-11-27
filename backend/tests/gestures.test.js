@@ -85,7 +85,7 @@ test('classifier interface is swappable', () => {
   assert.throws(() => G.createClassifier('missing'), /Unknown classifier/);
 });
 
-test('trained MLP neural network classifier recognises all 12 gestures with high softmax confidence', () => {
+test('checked-in MLP classifies synthetic examples; these are not real-signer accuracy tests', () => {
   const mlp = G.createClassifier('mlp');
   for (const [name, lm] of CASES) {
     const r = mlp.evaluate(lm);
@@ -104,5 +104,7 @@ test('evaluation script computes precision/recall/confusion/false-positive rate 
   fs.writeFileSync(f, rows.map(r => JSON.stringify(r)).join('\n'));
   const r = evaluateFile(f); assert.equal(r.samples, 14); assert.equal(r.falsePositiveRateOnNone, 0);
   assert.equal(r.confusionMatrix.POINT.PEACE, 1); assert.equal(r.perClass.find(s => s.label === 'POINT').recall, 0.5);
+  const mlp = evaluateFile(f, { classifier: 'mlp' });
+  assert.equal(mlp.classifier, 'mlp'); assert.equal(mlp.samples, 14);
   assert.throws(() => { fs.writeFileSync(f, 'nope'); evaluateFile(f); }, /not valid JSON/);
 });

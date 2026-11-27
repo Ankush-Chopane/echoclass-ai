@@ -13,7 +13,7 @@
 | `useRef`, `useCallback`, `useMemo` | Video element and caption scroller, stable callbacks, context values (`AuthContext.jsx`) |
 | `useReducer` | Caption/presence/request state of the live room (`hooks/useWebSocket.js`) |
 | Context API | `context/AuthContext.jsx` (user + token), `context/AccessibilityContext.jsx` (text size, contrast) |
-| Custom hooks | `useWebSocket`, `useSpeechRecognition`, `useOfflineSpeech`, `useHandTracker`, `useAuth`, `useAccessibility` |
+| Custom hooks | `useWebSocket`, `useSpeechRecognition`, `useClassAudio`, `useHandTracker`, `useAuth`, `useAccessibility` |
 | Routing (React Router 6): nested routes, params, redirects, protected routes | `App.jsx`, `layouts/AppLayout.jsx` (`Outlet`), `useParams`/`useNavigate` in pages |
 | Controlled forms and validation | Login/Register/Create/Join/Vocabulary forms with **zod** schemas (`schemas/*.js`); server field errors shown from `err.fields` |
 | Data fetching and error handling | `services/api.js` (fetch wrapper, `ApiError`, 401 handling, blob download) |

@@ -43,8 +43,7 @@ Returns server capabilities needed by the frontend on startup.
   "aiSummaries": false,
   "serverTranscription": false,
   "retentionChoices": [0, 30, 90, 180, 365],
-  "defaultRetentionDays": 0,
-  "offlineSpeech": { "available": true, "provider": "vosk", "ready": true }
+  "defaultRetentionDays": 0
 }
 ```
 
@@ -52,7 +51,7 @@ Returns server capabilities needed by the frontend on startup.
 
 ### `GET /api/system/network` (teacher only)
 
-Returns `{ localIps, port, https, httpsPort, speechEngine: { ready, ... } }` so the dashboard can show the LAN address students can open and whether the offline (Vosk) engine is ready. Students receive `403`.
+Returns `{ localIps, isCloud, publicUrl, port, host, https, httpsPort }` so the dashboard can show the address students can open. Students receive `403`.
 
 ## Auth Endpoints
 
@@ -523,6 +522,10 @@ The WebSocket handles all real-time communication during a live session.
 | `presence` | Users in room: `{ users: [{ id, name, role }] }` |
 | `request` | Student request: `{ kind, user, counts: {...} }` |
 | `flag` | Caption flagged: `{ captionId, kind, count }` |
+| `teacher_audio_state` | Teacher audio sharing state; includes whether this teacher connection owns the stream |
+| `audio_listen_state` | Student listening preference and current teacher-audio state |
+| `audio_listeners` | Teacher-only list of students who opted in |
+| `audio_signal` | Targeted WebRTC offer, answer, or ICE candidate |
 | `ack` | Caption acknowledgement: `{ cid, id, duplicate }` |
 | `ended` | Session has ended — client should close |
 | `error` | `{ code }` — e.g. `rate_limited`, `bad_caption` |
@@ -536,17 +539,18 @@ The WebSocket handles all real-time communication during a live session.
 | `caption` | Student | `source: "sign"\|"student", final, text, cid?` | Sign gesture or typed response |
 | `request` | Student | `kind` | Quick request (raise_hand, slow_down, etc.) |
 | `flag` | Student | `kind, captionId` | Flag a caption |
-| `speech_chunk` | Teacher | `data: base64` | Audio chunk for Vosk offline recognition |
-| `speech_stop` | Teacher | — | Flush pending audio to Vosk |
+| `teacher_audio_state` | Teacher | `active: boolean` | Enable or stop optional live microphone sharing |
+| `audio_listen` | Student | `active: boolean` | Opt in or out of live teacher audio |
+| `audio_signal` | Teacher/student | `toUserId, signal` | WebRTC signaling relayed only to the opted-in peer in the same class |
 | `ping` | Any | — | Keepalive |
 
-Offline-speech errors (server → client `error`): `offline_speech_unavailable` (no Vosk model installed), `offline_speech_busy` (another open lecture is using the single engine), `bad_audio` (invalid base64).
+Live teacher audio is peer-to-peer and is not recorded. Direct connections are intended for the same local network; other network layouts may require a TURN server.
 
 ### Source field values
 
 | Value | Sender | Meaning |
 |---|---|---|
-| `speech` | Teacher | From microphone (Web Speech API or Vosk) |
+| `speech` | Teacher | Caption recognized by the browser's Web Speech API |
 | `typed` | Teacher | Manually typed |
 | `sign` | Student | From gesture recognition |
 | `student` | Student | Quick phrase or typed message |

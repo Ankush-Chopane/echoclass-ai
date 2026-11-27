@@ -1,5 +1,5 @@
 import { useReducer, useEffect, useRef, useCallback, useState } from 'react';
-import { api, wsBaseUrl } from '../services/api';
+import { api, wsBaseUrl } from '../services/api.js';
 
 /**
  * Live classroom socket.
@@ -7,26 +7,54 @@ import { api, wsBaseUrl } from '../services/api';
  *  - reconnects with exponential back-off, re-sending finals that were not acknowledged (the server de-duplicates by `cid`)
  *  - all server state lives in one reducer so React renders from a single source of truth
  */
-const initial = { captions: [], interim: null, presence: [], flags: {}, requests: {}, session: null, teacherVideo: { active: false, speaker: null, frame: null }, studentVideos: {} };
+const initial = { captions: [], interim: null, presence: [], flags: {}, requests: {}, studentAlerts: [], session: null, teacherVideo: { active: false, speaker: null, frame: null }, teacherAudioActive: false, teacherAudioOwned: false, teacherAudioError: null, audioListening: false, audioListeners: [], studentVideos: {} };
 
-function reducer(state, a) {
+export function reducer(state, a) {
   switch (a.type) {
     case 'init': {
       const sv = {};
       for (const item of a.studentVideos || []) {
         if (item?.userId != null) sv[item.userId] = { userId: item.userId, name: item.name, active: Boolean(item.active), frame: null };
       }
-      return { ...state, captions: a.captions || [], flags: a.flags || {}, requests: a.requests || {}, session: a.session || null, teacherVideo: a.video ? { active: Boolean(a.video.active), speaker: a.video.speaker || null, frame: null } : { active: false, speaker: null, frame: null }, studentVideos: sv, interim: null };
+      return {
+        ...state,
+        captions: a.captions || [],
+        flags: a.flags || {},
+        requests: a.requests || {},
+        session: a.session || null,
+        teacherVideo: a.video ? { active: Boolean(a.video.active), speaker: a.video.speaker || null, frame: null } : { active: false, speaker: null, frame: null },
+        teacherAudioActive: Boolean(a.teacherAudioActive),
+        teacherAudioOwned: Boolean(a.teacherAudioOwned),
+        teacherAudioError: null,
+        audioListening: Boolean(a.audioListening),
+        audioListeners: a.audioListeners || [],
+        studentVideos: sv,
+        interim: null
+      };
     }
     case 'caption': {
       const c = a.caption;
       if (state.captions.some((x) => x.id === c.id)) return state;                                   // duplicate delivery after a reconnect
-      return { ...state, captions: [...state.captions, c], interim: state.interim?.speaker === c.speaker ? null : state.interim };
+      const studentAlert = c.source === 'sign' || c.source === 'student'
+        ? { id: `caption-${c.id}`, kind: 'caption', speaker: c.speaker, source: c.source, text: c.text }
+        : null;
+      return {
+        ...state,
+        captions: [...state.captions, c],
+        studentAlerts: studentAlert ? [...state.studentAlerts, studentAlert].slice(-8) : state.studentAlerts,
+        interim: state.interim?.speaker === c.speaker ? null : state.interim
+      };
     }
     case 'interim': return { ...state, interim: a.text ? { speaker: a.speaker, text: a.text } : null };
     case 'presence': return { ...state, presence: a.users || [] };
     case 'flag': return { ...state, flags: { ...state.flags, [a.captionId]: { ...(state.flags[a.captionId] || {}), [a.kind]: a.count } } };
-    case 'request': return { ...state, requests: a.counts || state.requests };
+    case 'request': return {
+      ...state,
+      requests: a.counts || state.requests,
+      studentAlerts: a.alert ? [...state.studentAlerts, a.alert].slice(-8) : state.studentAlerts
+    };
+    case 'dismiss_student_alert': return { ...state, studentAlerts: state.studentAlerts.filter((item) => item.id !== a.id) };
+    case 'clear_student_alerts': return { ...state, studentAlerts: [] };
     case 'video_state': return { ...state, teacherVideo: { active: Boolean(a.active), speaker: a.speaker || null, frame: a.active ? state.teacherVideo.frame : null } };
     case 'video_frame': return { ...state, teacherVideo: { active: true, speaker: a.speaker || state.teacherVideo.speaker, frame: a.data } };
     case 'student_video_state': {
@@ -37,6 +65,15 @@ function reducer(state, a) {
       const prev = state.studentVideos[a.userId];
       return { ...state, studentVideos: { ...state.studentVideos, [a.userId]: { userId: a.userId, name: a.name || prev?.name || 'Student', active: true, frame: a.data } } };
     }
+    case 'teacher_audio_state': return {
+      ...state,
+      teacherAudioActive: Boolean(a.active),
+      teacherAudioOwned: Boolean(a.owned),
+      teacherAudioError: a.error || null
+    };
+    case 'clear_teacher_audio_error': return { ...state, teacherAudioError: null };
+    case 'audio_listen_state': return { ...state, audioListening: Boolean(a.active), teacherAudioActive: Boolean(a.teacherAudioActive) };
+    case 'audio_listeners': return { ...state, audioListeners: a.listeners || [] };
     default: return state;
   }
 }
@@ -46,15 +83,17 @@ const newCid = () => `c-${Date.now().toString(36)}-${Math.random().toString(36).
 export function useWebSocket(sessionId) {
   const [state, dispatch] = useReducer(reducer, initial);
   const [status, setStatus] = useState('connecting');       // connecting | connected | reconnecting | ended | failed
-  const [notice, setNotice] = useState(null);                // last server error code, e.g. rate_limited, offline_speech_unavailable
+  const [notice, setNotice] = useState(null);                // last server error code, e.g. rate_limited or bad_caption
   const [failure, setFailure] = useState('');
   const wsRef = useRef(null);
   const outbox = useRef(new Map());                          // cid -> payload awaiting an ack
+  const audioSignalHandlers = useRef(new Set());
 
   useEffect(() => {
     if (!sessionId) return undefined;
     let stopped = false, attempt = 0, retryTimer = null, pingTimer = null, ended = false;
     dispatch({ type: 'init' });
+    dispatch({ type: 'clear_student_alerts' });
 
     const flushOutbox = (ws) => outbox.current.forEach((payload) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(payload)));
     const fatal = (msg) => { stopped = true; setFailure(msg); setStatus('failed'); };
@@ -81,16 +120,29 @@ export function useWebSocket(sessionId) {
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         switch (m.type) {
-          case 'init': dispatch({ type: 'init', captions: m.captions, flags: m.flags, requests: m.requests, session: m.session, video: m.video, studentVideos: m.studentVideos }); break;
+          case 'init': dispatch({ type: 'init', captions: m.captions, flags: m.flags, requests: m.requests, session: m.session, video: m.video, teacherAudioActive: m.teacherAudioActive, teacherAudioOwned: m.teacherAudioOwned, audioListening: m.audioListening, audioListeners: m.audioListeners, studentVideos: m.studentVideos }); break;
           case 'caption': dispatch({ type: 'caption', caption: m.caption }); break;
           case 'interim': dispatch({ type: 'interim', speaker: m.speaker, text: m.text }); break;
           case 'presence': dispatch({ type: 'presence', users: m.users }); break;
           case 'flag': dispatch({ type: 'flag', captionId: m.captionId, kind: m.kind, count: m.count }); break;
-          case 'request': dispatch({ type: 'request', counts: m.counts }); break;
+          case 'request': dispatch({
+            type: 'request',
+            counts: m.counts,
+            alert: {
+              id: `request-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              kind: 'request',
+              speaker: m.user || 'Student',
+              request: m.kind
+            }
+          }); break;
           case 'video_state': dispatch({ type: 'video_state', active: m.active, speaker: m.speaker }); break;
           case 'video_frame': dispatch({ type: 'video_frame', speaker: m.speaker, data: m.data }); break;
           case 'student_video_state': dispatch({ type: 'student_video_state', userId: m.userId, name: m.name, active: m.active }); break;
           case 'student_video_frame': dispatch({ type: 'student_video_frame', userId: m.userId, name: m.name, data: m.data }); break;
+          case 'teacher_audio_state': dispatch({ type: 'teacher_audio_state', active: m.active, owned: m.owned, error: m.error }); break;
+          case 'audio_listen_state': dispatch({ type: 'audio_listen_state', active: m.active, teacherAudioActive: m.teacherAudioActive }); break;
+          case 'audio_listeners': dispatch({ type: 'audio_listeners', listeners: m.listeners }); break;
+          case 'audio_signal': audioSignalHandlers.current.forEach((handler) => handler(m)); break;
           case 'ack': if (m.cid) outbox.current.delete(m.cid); break;
           case 'error': setNotice(m.code); break;
           case 'ended': ended = true; setStatus('ended'); break;
@@ -145,5 +197,13 @@ export function useWebSocket(sessionId) {
   const sendFlag = useCallback((captionId, kind = 'confusing') => raw({ type: 'flag', captionId, kind }), [raw]);
   const sendRequest = useCallback((kind) => raw({ type: 'request', kind }), [raw]);
 
-  return { ...state, status, connected: status === 'connected', ended: status === 'ended', failure, notice, sendCaption, sendFlag, sendRequest, sendRaw: raw };
+  const dismissStudentAlert = useCallback((id) => dispatch({ type: 'dismiss_student_alert', id }), []);
+  const clearStudentAlerts = useCallback(() => dispatch({ type: 'clear_student_alerts' }), []);
+  const clearTeacherAudioError = useCallback(() => dispatch({ type: 'clear_teacher_audio_error' }), []);
+  const subscribeAudioSignals = useCallback((handler) => {
+    audioSignalHandlers.current.add(handler);
+    return () => audioSignalHandlers.current.delete(handler);
+  }, []);
+
+  return { ...state, status, connected: status === 'connected', ended: status === 'ended', failure, notice, sendCaption, sendFlag, sendRequest, sendRaw: raw, dismissStudentAlert, clearStudentAlerts, clearTeacherAudioError, subscribeAudioSignals };
 }

@@ -25,11 +25,10 @@
     "backup": "npm run backup -w @echoclass/backend",
     "docs:gestures": "npm run docs:gestures -w @echoclass/backend",
     "eval:gestures": "npm run eval:gestures -w @echoclass/backend --",
+    "train:gestures": "npm run train:gestures -w @echoclass/backend --",
     "fetch-model": "npm run fetch-model -w @echoclass/backend",
-    "fetch-speech-model": "npm run fetch-speech-model -w @echoclass/backend",
     "gen-cert": "npm run gen-cert -w @echoclass/backend",
-    "preflight": "npm run preflight -w @echoclass/backend",
-    "setup:offline": "npm run fetch-model && npm run fetch-speech-model"
+    "preflight": "npm run preflight -w @echoclass/backend"
   },
   "engines": {
     "node": ">=22.12"

@@ -18,7 +18,7 @@ Students with hearing disabilities are excluded from lectures that rely entirely
 
 ## The Solution
 
-EchoClass AI runs on the teacher's laptop. Students connect over the classroom's local Wi-Fi. Captions work without internet when the offline Vosk engine is installed; the browser Web Speech API (Chrome/Edge/Safari) sends audio to the browser vendor's cloud. Setup: `npm ci && npm run build:classroom && npm start`.
+EchoClass AI runs on the teacher's laptop. Students connect over the classroom's local Wi-Fi. Teacher speech captions use the browser Web Speech API (Chrome/Edge/Safari), which generally requires internet and may send audio to the browser vendor's cloud. Setup: `npm ci && npm run build:classroom && npm start`.
 
 ## What EchoClass AI Is NOT
 

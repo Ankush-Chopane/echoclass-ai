@@ -1,21 +1,29 @@
-# Evaluating gesture recognition
+# Evaluating classroom pose recognition
 
-**This repository contains no real-hand dataset and reports no accuracy figures.** The unit tests in `apps/backend/tests/gestures.test.js` use synthetic landmark skeletons: they prove the geometry code behaves as designed, not that it works on real hands, skin tones, lighting, cameras or signers.
+**There is no consented real-signer dataset in this repository and no measured real-world recognition accuracy.** The current labels are application-defined classroom cues, not validated ISL signs. Unit tests use synthetic landmarks and only check code behavior.
 
-## Collect data (with consent)
-1. Get informed consent from each participant (and a guardian for minors). Record only landmarks, never video, unless consent covers video.
-2. Capture at least ~10 people × each pose × 2 lighting conditions × 2 camera angles, plus plenty of `NONE` frames (resting hand, waving, pointing at the screen, mid-sentence gestures).
-3. Write one JSON object per line:
+## Collect evaluation data
+
+Get informed consent from every participant (and guardian consent for minors). Ask an ISL instructor and Deaf signers to validate any proposed ISL sign and its meaning. Store pseudonymous person IDs. Record landmarks only unless video capture is explicitly consented to.
+
+Capture each cue and `NONE` (ordinary, resting, partial, or unsupported movements) from multiple people, sessions, camera angles, and lighting conditions. Keep all recordings from one person in the same split. The training script does this automatically when it receives a `person` value for every sample.
+
+Each JSONL line must contain a valid label, a pseudonymous `person` ID, and exactly 21 finite landmarks:
+
 ```json
-{"label":"POINT","person":"p01","session":"s1","landmarks":[{"x":0.5,"y":0.6,"z":0}, "... 21 points ..."]}
+{"label":"POINT","person":"p01","session":"s1","landmarks":[{"x":0.5,"y":0.6,"z":0}, "... 20 more points ..."]}
 ```
-`label` is one of the poses in `docs/GESTURES.md` or `NONE`.
 
-## Run
+The sample is abbreviated for readability; the actual file must contain all 21 landmark objects.
+
+## Train and evaluate
+
 ```bash
-npm run eval:gestures -- path/to/samples.jsonl
+npm run train:gestures -- --data path/to/samples.jsonl
+npm run eval:gestures -- path/to/held-out-samples.jsonl --classifier mlp
+npm run eval:gestures -- path/to/held-out-samples.jsonl --classifier geometric
 ```
-The script prints samples, number of people, per-class precision/recall/support, the confusion matrix and the false-positive rate on `NONE` frames. Report it **per person and per lighting condition**, not just overall. Keep people in the test set out of any threshold tuning.
 
-## What to claim
-Only what the numbers support, for the population you tested. Poses are classroom conventions, not a sign language; never describe results as "sign-language recognition accuracy".
+The training command reports a person-disjoint validation score. The evaluation command reports per-class precision/recall, a confusion matrix, and false-positive rate on `NONE`. `geometric` is the hand-written baseline; `mlp` evaluates the currently loaded neural-network model. Use genuinely held-out people for final evaluation and do not tune thresholds against that final set.
+
+Report results by signer and recording condition, not only as one aggregate number. Never describe these results as ISL recognition accuracy unless the vocabulary and examples were validated by ISL experts and the evaluation population supports that claim.

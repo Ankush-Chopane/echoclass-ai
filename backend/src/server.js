@@ -51,7 +51,7 @@ if (require.main === module) {
     const localHost = cfg.host === '0.0.0.0' ? 'localhost' : cfg.host;
 
     console.log('\n===============================================================');
-    console.log('   EchoClass AI – Offline Classroom Assistant Running');
+    console.log('   EchoClass AI – Classroom Assistant Running');
     console.log('===============================================================');
     console.log(`   Teacher (This Computer): http://${localHost}:${cfg.port}`);
     if (localIps.length) {
