@@ -7,11 +7,11 @@ import { api, wsBaseUrl } from '../services/api';
  *  - reconnects with exponential back-off, re-sending finals that were not acknowledged (the server de-duplicates by `cid`)
  *  - all server state lives in one reducer so React renders from a single source of truth
  */
-const initial = { captions: [], interim: null, presence: [], flags: {}, requests: {}, session: null };
+const initial = { captions: [], interim: null, presence: [], flags: {}, requests: {}, session: null, teacherVideo: { active: false, speaker: null, frame: null } };
 
 function reducer(state, a) {
   switch (a.type) {
-    case 'init': return { ...state, captions: a.captions || [], flags: a.flags || {}, requests: a.requests || {}, session: a.session || null, interim: null };
+    case 'init': return { ...state, captions: a.captions || [], flags: a.flags || {}, requests: a.requests || {}, session: a.session || null, teacherVideo: a.video ? { active: Boolean(a.video.active), speaker: a.video.speaker || null, frame: null } : { active: false, speaker: null, frame: null }, interim: null };
     case 'caption': {
       const c = a.caption;
       if (state.captions.some((x) => x.id === c.id)) return state;                                   // duplicate delivery after a reconnect
@@ -21,6 +21,8 @@ function reducer(state, a) {
     case 'presence': return { ...state, presence: a.users || [] };
     case 'flag': return { ...state, flags: { ...state.flags, [a.captionId]: { ...(state.flags[a.captionId] || {}), [a.kind]: a.count } } };
     case 'request': return { ...state, requests: a.counts || state.requests };
+    case 'video_state': return { ...state, teacherVideo: { active: Boolean(a.active), speaker: a.speaker || null, frame: a.active ? state.teacherVideo.frame : null } };
+    case 'video_frame': return { ...state, teacherVideo: { active: true, speaker: a.speaker || state.teacherVideo.speaker, frame: a.data } };
     default: return state;
   }
 }
@@ -65,12 +67,14 @@ export function useWebSocket(sessionId) {
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         switch (m.type) {
-          case 'init': dispatch({ type: 'init', captions: m.captions, flags: m.flags, requests: m.requests, session: m.session }); break;
+          case 'init': dispatch({ type: 'init', captions: m.captions, flags: m.flags, requests: m.requests, session: m.session, video: m.video }); break;
           case 'caption': dispatch({ type: 'caption', caption: m.caption }); break;
           case 'interim': dispatch({ type: 'interim', speaker: m.speaker, text: m.text }); break;
           case 'presence': dispatch({ type: 'presence', users: m.users }); break;
           case 'flag': dispatch({ type: 'flag', captionId: m.captionId, kind: m.kind, count: m.count }); break;
           case 'request': dispatch({ type: 'request', counts: m.counts }); break;
+          case 'video_state': dispatch({ type: 'video_state', active: m.active, speaker: m.speaker }); break;
+          case 'video_frame': dispatch({ type: 'video_frame', speaker: m.speaker, data: m.data }); break;
           case 'ack': if (m.cid) outbox.current.delete(m.cid); break;
           case 'error': setNotice(m.code); break;
           case 'ended': ended = true; setStatus('ended'); break;

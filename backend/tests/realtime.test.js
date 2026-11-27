@@ -118,6 +118,29 @@ test('reconnection: a new ticket restores history; sockets of the same user are 
   assert.ok(socks.filter(s => s.readyState === 1).length <= 4); [b, ...socks].forEach(w => w.close());
 });
 
+test('teacher live video: state and JPEG frames relay to students; students cannot broadcast video', async () => {
+  const tw = await h.connect(T, sess.id), a = await h.connect(S1, sess.id);
+  send(a, { type: 'video_state', active: true });
+  await waitFor(() => a.msgs.some(m => m.type === 'error'));
+
+  send(tw, { type: 'video_state', active: true });
+  await waitFor(() => a.msgs.some(m => m.type === 'video_state' && m.active === true));
+
+  const frame = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+  send(tw, { type: 'video_frame', data: frame });
+  await waitFor(() => a.msgs.some(m => m.type === 'video_frame'));
+  assert.equal(a.msgs.find(m => m.type === 'video_frame').data, frame);
+
+  const late = await h.connect(S2, sess.id);
+  const lateInit = late.msgs.find(m => m.type === 'init');
+  assert.equal(lateInit.video.active, true);
+  assert.equal(lateInit.video.speaker, 'Teacher');
+
+  send(tw, { type: 'video_state', active: false });
+  await waitFor(() => a.msgs.some(m => m.type === 'video_state' && m.active === false));
+  [tw, a, late].forEach(w => w.close());
+});
+
 test('ending a lesson notifies and closes sockets; ended lessons refuse new connections and messages', async () => {
   const tw = await h.connect(T, sess.id), a = await h.connect(S1, sess.id);
   const closed = new Promise(r => a.on('close', c => r(c)));

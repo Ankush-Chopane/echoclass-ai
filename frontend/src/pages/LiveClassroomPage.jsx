@@ -5,6 +5,7 @@ import { useAccessibility } from '../hooks/useAccessibility';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { useOfflineSpeech } from '../hooks/useOfflineSpeech';
+import { useTeacherVideo } from '../hooks/useTeacherVideo';
 import { api } from '../services/api';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
@@ -61,7 +62,7 @@ export function LiveClassroomPage() {
   }, [id]);
 
   const ws = useWebSocket(sessionId);
-  const { captions, interim, presence, flags, requests, status, notice, failure, sendCaption, sendFlag, sendRequest, sendRaw } = ws;
+  const { captions, interim, presence, flags, requests, teacherVideo, status, notice, failure, sendCaption, sendFlag, sendRequest, sendRaw } = ws;
 
   // When the lecture ends (teacher pressed End, or it ended elsewhere) everyone is taken to the saved transcript.
   useEffect(() => { if (status === 'ended' && sessionId) { const t = setTimeout(() => navigate(`/transcripts/${sessionId}`, { replace: true }), 1500); return () => clearTimeout(t); } return undefined; }, [status, sessionId, navigate]);
@@ -76,14 +77,15 @@ export function LiveClassroomPage() {
   const offlineMic = useOfflineSpeech({ send: sendRaw, available: offlineAvailable });
   const mic = engine === 'offline' ? offlineMic : browserMic;
   const micOn = mic.listening;
-  const stopAll = useCallback(() => { browserMic.stop(); offlineMic.stop(); }, [browserMic, offlineMic]);
+  const teacherCam = useTeacherVideo({ sendRaw });
+  const stopAll = useCallback(() => { browserMic.stop(); offlineMic.stop(); teacherCam.stop(); }, [browserMic, offlineMic, teacherCam]);
 
   useEffect(() => {
     if (!isTeacher) return undefined;
-    const warn = (e) => { if (micOn) { e.preventDefault(); e.returnValue = ''; } };
+    const warn = (e) => { if (micOn || teacherCam.active) { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [isTeacher, micOn]);
+  }, [isTeacher, micOn, teacherCam.active]);
   useEffect(() => { if (status === 'ended' || status === 'failed') stopAll(); }, [status, stopAll]);
 
   // 3) Auto-scroll only while the reader is at the bottom (never yank the view away from someone re-reading).
@@ -119,6 +121,10 @@ export function LiveClassroomPage() {
   const [badgeStatus, badgeLabel] = CONNECTION[status] || CONNECTION.connecting;
   const lectureTitle = ws.session?.title || classroom.live?.title || classroom.name;
   const readOnly = status === 'ended' || status === 'failed';
+  const latestSpeechCaption = [...captions].reverse().find((c) => c.source === 'speech' || c.source === 'typed');
+  const videoSubtitleText = localInterim || interim?.text || latestSpeechCaption?.text || '';
+  const videoSubtitleIsInterim = Boolean(localInterim || interim?.text);
+  const showVideoStage = isTeacher ? (teacherCam.status === 'starting' || teacherCam.active) : teacherVideo.active;
 
   return (
     <div className="flex flex-col gap-4">
@@ -143,8 +149,61 @@ export function LiveClassroomPage() {
       {notice && NOTICES[notice] && <div role="alert" className="p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm">{NOTICES[notice]}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* captions */}
-        <section className="lg:col-span-2 flex flex-col bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden h-[60vh] lg:h-[calc(100vh-14rem)] min-h-[320px]" aria-label="Live captions">
+        {/* left column: optional teacher video + live captions */}
+        <div className="lg:col-span-2 flex flex-col gap-4">
+          {isTeacher && (
+            <section className={`rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 ${showVideoStage ? '' : 'hidden'}`} aria-label="Teacher video preview">
+              <div className="px-3 py-2 bg-slate-900/70 border-b border-slate-800 flex items-center justify-between text-xs text-slate-300">
+                <span className="font-semibold flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse" aria-hidden="true" />
+                  Your live video (visible to students)
+                </span>
+                <Button variant="danger" size="sm" onClick={teacherCam.stop}>Turn off video</Button>
+              </div>
+              <div className="relative bg-black aspect-video max-h-[340px] mx-auto flex items-center justify-center">
+                <video ref={teacherCam.videoRef} playsInline muted className="w-full h-full object-contain -scale-x-100" aria-label="Teacher camera preview" />
+              </div>
+              <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 min-h-[3rem] flex items-center" aria-live="polite">
+                {videoSubtitleText ? (
+                  <p style={{ fontSize: `${Math.max(15, Math.min(captionSize, 26))}px`, lineHeight: 1.35 }} className={videoSubtitleIsInterim ? 'italic text-emerald-300 font-medium' : 'text-white font-semibold'}>
+                    {videoSubtitleText}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">Start your microphone to show live speech subtitles below your video.</p>
+                )}
+              </div>
+            </section>
+          )}
+
+          {!isTeacher && showVideoStage && (
+            <section className="rounded-2xl overflow-hidden border border-slate-800 bg-slate-950" aria-label="Teacher live video">
+              <div className="px-3 py-2 bg-slate-900/70 border-b border-slate-800 flex items-center justify-between text-xs text-slate-300">
+                <span className="font-semibold flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse" aria-hidden="true" />
+                  {teacherVideo.speaker ? `${teacherVideo.speaker} (Teacher)` : 'Teacher live video'}
+                </span>
+                <span className="text-[11px] text-emerald-400 font-semibold">LIVE VIDEO</span>
+              </div>
+              <div className="relative bg-black aspect-video max-h-[340px] mx-auto flex items-center justify-center">
+                {teacherVideo.frame ? (
+                  <img src={teacherVideo.frame} alt="Teacher live video" className="w-full h-full object-contain -scale-x-100" />
+                ) : (
+                  <p className="text-xs text-slate-400">Connecting to teacher video…</p>
+                )}
+              </div>
+              <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 min-h-[3rem] flex items-center" aria-live="polite">
+                {videoSubtitleText ? (
+                  <p style={{ fontSize: `${Math.max(15, Math.min(captionSize, 26))}px`, lineHeight: 1.35 }} className={videoSubtitleIsInterim ? 'italic text-emerald-300 font-medium' : 'text-white font-semibold'}>
+                    {videoSubtitleText}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">Waiting for teacher speech…</p>
+                )}
+              </div>
+            </section>
+          )}
+
+          <section className={`flex flex-col bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden ${showVideoStage ? 'h-[45vh] min-h-[260px]' : 'h-[60vh] lg:h-[calc(100vh-14rem)] min-h-[320px]'}`} aria-label="Live captions">
           <div className="p-3 border-b border-slate-800 bg-slate-900/50 flex justify-between text-xs text-slate-400">
             <span>💬 Live captions</span><span>Text size: {captionSize}px (change under Display)</span>
           </div>
@@ -186,20 +245,25 @@ export function LiveClassroomPage() {
             )}
           </div>
           <p className="px-4 py-2 text-[11px] text-slate-400 border-t border-slate-800">Dashed italic lines are still being recognised and may change. Finished lines are saved to the transcript.</p>
-        </section>
+          </section>
+        </div>
 
         {/* side panel */}
         <div className="flex flex-col gap-4">
           {isTeacher ? (
             <>
               <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-3" aria-labelledby="mic-h">
-                <h2 id="mic-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">Teacher microphone</h2>
-                <div className="flex items-center gap-3">
+                <h2 id="mic-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">Teacher camera &amp; microphone</h2>
+                <div className="flex flex-wrap items-center gap-2">
                   <Button variant={micOn ? 'danger' : 'primary'} onClick={micOn ? mic.stop : mic.start} aria-pressed={micOn} disabled={readOnly || (engine === 'browser' && !browserMic.supported)}>
                     {micOn ? '■ Stop microphone' : '🎙 Start microphone'}
                   </Button>
-                  <span className="text-xs" role="status" aria-live="polite">{engine === 'browser' ? ENGINE_STATE[browserMic.state] : (offlineMic.state === 'listening' ? 'Listening (offline engine)' : offlineMic.state === 'starting' ? 'Starting microphone…' : offlineMic.state === 'error' ? 'Offline engine stopped' : 'Microphone off')}</span>
+                  <Button variant={teacherCam.active ? 'danger' : 'secondary'} onClick={teacherCam.active ? teacherCam.stop : teacherCam.start} aria-pressed={teacherCam.active} disabled={readOnly || teacherCam.status === 'starting'}>
+                    {teacherCam.active ? '📹 Turn off video' : teacherCam.status === 'starting' ? 'Starting camera…' : '📹 Turn on video'}
+                  </Button>
                 </div>
+                <span className="text-xs text-slate-300" role="status" aria-live="polite">{engine === 'browser' ? ENGINE_STATE[browserMic.state] : (offlineMic.state === 'listening' ? 'Listening (offline engine)' : offlineMic.state === 'starting' ? 'Starting microphone…' : offlineMic.state === 'error' ? 'Offline engine stopped' : 'Microphone off')}{teacherCam.active ? ' · Video on' : ''}</span>
+                {teacherCam.error && <p role="alert" className="text-xs text-rose-300">{teacherCam.error}</p>}
                 {mic.message && <p role="alert" className="text-xs text-amber-300">{mic.message}</p>}
                 {engine === 'browser' && !browserMic.supported && <p className="text-xs text-amber-300">This browser has no speech recognition (Firefox). Use Chrome, Edge or Safari, choose the offline engine, or type captions below.</p>}
 
