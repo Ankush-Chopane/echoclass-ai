@@ -138,7 +138,18 @@ test('teacher live video: state and JPEG frames relay to students; students cann
 
   send(tw, { type: 'video_state', active: false });
   await waitFor(() => a.msgs.some(m => m.type === 'video_state' && m.active === false));
-  [tw, a, late].forEach(w => w.close());
+
+  // Student camera relays to teacher only (not to other students)
+  const b = await h.connect(S2, sess.id);
+  send(a, { type: 'student_video_state', active: true });
+  await waitFor(() => tw.msgs.some(m => m.type === 'student_video_state' && m.userId === S1.user.id && m.active === true));
+  send(a, { type: 'student_video_frame', data: frame });
+  await waitFor(() => tw.msgs.some(m => m.type === 'student_video_frame' && m.userId === S1.user.id));
+  assert.equal(b.msgs.some(m => m.type === 'student_video_frame'), false);
+  send(a, { type: 'student_video_state', active: false });
+  await waitFor(() => tw.msgs.some(m => m.type === 'student_video_state' && m.userId === S1.user.id && m.active === false));
+
+  [tw, a, b, late].forEach(w => w.close());
 });
 
 test('ending a lesson notifies and closes sockets; ended lessons refuse new connections and messages', async () => {

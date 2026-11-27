@@ -15,6 +15,7 @@ const TICKET_TTL_MS = 30_000, MAX_PER_SESSION = 400, MAX_PER_USER = 4;
 function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEngine }) {
   const rooms = new Map();       // sessionId -> Set<ws>
   const roomVideo = new Map();   // sessionId -> { active: boolean, speaker: string }
+  const roomStudentVideos = new Map(); // sessionId -> Map<userId, { userId, name, active }>
   const tickets = new Map();     // ticket -> { userId, sessionId, exp }
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   let activeStreamingWs = null;
@@ -74,6 +75,10 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
   function broadcast(sid, msg, except) {
     const data = JSON.stringify(msg);
     for (const w of rooms.get(sid) || []) if (w !== except && w.readyState === 1) w.send(data);
+  }
+  function broadcastToTeachers(sid, msg) {
+    const data = JSON.stringify(msg);
+    for (const w of rooms.get(sid) || []) if (w.user?.role === 'teacher' && w.readyState === 1) w.send(data);
   }
   const send = (ws, msg) => { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); };
   const presenceTimers = new Map();
@@ -136,7 +141,16 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
     ws.on('error', () => {});
     ws.rate = []; ws.bad = 0; ws.lastInterim = 0; ws.lastFinal = { text: '', at: 0, id: null }; ws.cool = {};
     const flags = {}; for (const f of q.flagCounts.all(sid)) (flags[f.caption_id] ||= {})[f.kind] = f.n;
-    send(ws, { type: 'init', session: q.session.get(sid), captions: q.captions.all(sid), flags, requests: reqCounts(sid), video: roomVideo.get(sid) || { active: false, speaker: null }, you: { id: user.id, role: user.role } });
+    send(ws, {
+      type: 'init',
+      session: q.session.get(sid),
+      captions: q.captions.all(sid),
+      flags,
+      requests: reqCounts(sid),
+      video: roomVideo.get(sid) || { active: false, speaker: null },
+      studentVideos: teacher ? Array.from(roomStudentVideos.get(sid)?.values() || []) : undefined,
+      you: { id: user.id, role: user.role }
+    });
     presence(sid);
 
     const violation = (code) => { send(ws, { type: 'error', code }); if (++ws.bad > 20) ws.close(1008, 'Too many invalid messages'); };
@@ -145,7 +159,7 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
       let m; try { m = JSON.parse(raw); } catch { return violation('bad_json'); }
       if (!m || typeof m !== 'object' || typeof m.type !== 'string') return violation('bad_message');
       const now = Date.now();
-      if (m.type !== 'speech_chunk' && m.type !== 'video_frame') {
+      if (m.type !== 'speech_chunk' && m.type !== 'video_frame' && m.type !== 'student_video_frame') {
         while (ws.rate.length && now - ws.rate[0] > 5000) ws.rate.shift();
         if (ws.rate.length >= (teacher ? 120 : 30)) { if (!ws.warned || now - ws.warned > 3000) { ws.warned = now; send(ws, { type: 'error', code: 'rate_limited' }); } return; }
         ws.rate.push(now);
@@ -187,6 +201,30 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
         ws.lastVideoAt = now;
         if (!ws.videoActive) { ws.videoActive = true; roomVideo.set(sid, { active: true, speaker: user.name }); }
         broadcast(sid, { type: 'video_frame', speaker: user.name, data: m.data }, ws);
+        return;
+      }
+
+      if (!teacher && m.type === 'student_video_state') {
+        const active = Boolean(m.active);
+        ws.studentVideoActive = active;
+        if (!roomStudentVideos.has(sid)) roomStudentVideos.set(sid, new Map());
+        const map = roomStudentVideos.get(sid);
+        if (active) map.set(user.id, { userId: user.id, name: user.name, active: true });
+        else map.delete(user.id);
+        broadcastToTeachers(sid, { type: 'student_video_state', userId: user.id, name: user.name, active });
+        return;
+      }
+
+      if (!teacher && m.type === 'student_video_frame') {
+        if (typeof m.data !== 'string' || m.data.length > 58000 || !m.data.startsWith('data:image/jpeg;base64,')) return violation('bad_video');
+        if (ws.lastStudentVideoAt && now - ws.lastStudentVideoAt < 140) return; // cap relay to ~7 fps
+        ws.lastStudentVideoAt = now;
+        if (!ws.studentVideoActive) {
+          ws.studentVideoActive = true;
+          if (!roomStudentVideos.has(sid)) roomStudentVideos.set(sid, new Map());
+          roomStudentVideos.get(sid).set(user.id, { userId: user.id, name: user.name, active: true });
+        }
+        broadcastToTeachers(sid, { type: 'student_video_frame', userId: user.id, name: user.name, data: m.data });
         return;
       }
 
@@ -233,8 +271,12 @@ function createHub({ db, loadUser, access, server, allowedOrigins = [], speechEn
         roomVideo.set(sid, { active: false, speaker: null });
         broadcast(sid, { type: 'video_state', active: false, speaker: null }, ws);
       }
+      if (ws.studentVideoActive) {
+        roomStudentVideos.get(sid)?.delete(user.id);
+        broadcastToTeachers(sid, { type: 'student_video_state', userId: user.id, name: user.name, active: false });
+      }
       const room = rooms.get(sid); room?.delete(ws);
-      if (room && !room.size) { rooms.delete(sid); roomVideo.delete(sid); } else presence(sid);
+      if (room && !room.size) { rooms.delete(sid); roomVideo.delete(sid); roomStudentVideos.delete(sid); } else presence(sid);
     });
     ws.on('error', () => {});
   });

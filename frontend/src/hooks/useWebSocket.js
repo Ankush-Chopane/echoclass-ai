@@ -7,11 +7,17 @@ import { api, wsBaseUrl } from '../services/api';
  *  - reconnects with exponential back-off, re-sending finals that were not acknowledged (the server de-duplicates by `cid`)
  *  - all server state lives in one reducer so React renders from a single source of truth
  */
-const initial = { captions: [], interim: null, presence: [], flags: {}, requests: {}, session: null, teacherVideo: { active: false, speaker: null, frame: null } };
+const initial = { captions: [], interim: null, presence: [], flags: {}, requests: {}, session: null, teacherVideo: { active: false, speaker: null, frame: null }, studentVideos: {} };
 
 function reducer(state, a) {
   switch (a.type) {
-    case 'init': return { ...state, captions: a.captions || [], flags: a.flags || {}, requests: a.requests || {}, session: a.session || null, teacherVideo: a.video ? { active: Boolean(a.video.active), speaker: a.video.speaker || null, frame: null } : { active: false, speaker: null, frame: null }, interim: null };
+    case 'init': {
+      const sv = {};
+      for (const item of a.studentVideos || []) {
+        if (item?.userId != null) sv[item.userId] = { userId: item.userId, name: item.name, active: Boolean(item.active), frame: null };
+      }
+      return { ...state, captions: a.captions || [], flags: a.flags || {}, requests: a.requests || {}, session: a.session || null, teacherVideo: a.video ? { active: Boolean(a.video.active), speaker: a.video.speaker || null, frame: null } : { active: false, speaker: null, frame: null }, studentVideos: sv, interim: null };
+    }
     case 'caption': {
       const c = a.caption;
       if (state.captions.some((x) => x.id === c.id)) return state;                                   // duplicate delivery after a reconnect
@@ -23,6 +29,14 @@ function reducer(state, a) {
     case 'request': return { ...state, requests: a.counts || state.requests };
     case 'video_state': return { ...state, teacherVideo: { active: Boolean(a.active), speaker: a.speaker || null, frame: a.active ? state.teacherVideo.frame : null } };
     case 'video_frame': return { ...state, teacherVideo: { active: true, speaker: a.speaker || state.teacherVideo.speaker, frame: a.data } };
+    case 'student_video_state': {
+      const prev = state.studentVideos[a.userId];
+      return { ...state, studentVideos: { ...state.studentVideos, [a.userId]: { userId: a.userId, name: a.name || prev?.name || 'Student', active: Boolean(a.active), frame: a.active ? (prev?.frame || null) : null } } };
+    }
+    case 'student_video_frame': {
+      const prev = state.studentVideos[a.userId];
+      return { ...state, studentVideos: { ...state.studentVideos, [a.userId]: { userId: a.userId, name: a.name || prev?.name || 'Student', active: true, frame: a.data } } };
+    }
     default: return state;
   }
 }
@@ -67,7 +81,7 @@ export function useWebSocket(sessionId) {
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         switch (m.type) {
-          case 'init': dispatch({ type: 'init', captions: m.captions, flags: m.flags, requests: m.requests, session: m.session, video: m.video }); break;
+          case 'init': dispatch({ type: 'init', captions: m.captions, flags: m.flags, requests: m.requests, session: m.session, video: m.video, studentVideos: m.studentVideos }); break;
           case 'caption': dispatch({ type: 'caption', caption: m.caption }); break;
           case 'interim': dispatch({ type: 'interim', speaker: m.speaker, text: m.text }); break;
           case 'presence': dispatch({ type: 'presence', users: m.users }); break;
@@ -75,6 +89,8 @@ export function useWebSocket(sessionId) {
           case 'request': dispatch({ type: 'request', counts: m.counts }); break;
           case 'video_state': dispatch({ type: 'video_state', active: m.active, speaker: m.speaker }); break;
           case 'video_frame': dispatch({ type: 'video_frame', speaker: m.speaker, data: m.data }); break;
+          case 'student_video_state': dispatch({ type: 'student_video_state', userId: m.userId, name: m.name, active: m.active }); break;
+          case 'student_video_frame': dispatch({ type: 'student_video_frame', userId: m.userId, name: m.name, data: m.data }); break;
           case 'ack': if (m.cid) outbox.current.delete(m.cid); break;
           case 'error': setNotice(m.code); break;
           case 'ended': ended = true; setStatus('ended'); break;

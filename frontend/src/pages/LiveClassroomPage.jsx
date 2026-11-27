@@ -69,7 +69,7 @@ export function LiveClassroomPage() {
   }, [id]);
 
   const ws = useWebSocket(sessionId);
-  const { captions, interim, presence, flags, requests, teacherVideo, status, notice, failure, sendCaption, sendFlag, sendRequest, sendRaw } = ws;
+  const { captions, interim, presence, flags, requests, teacherVideo, studentVideos, status, notice, failure, sendCaption, sendFlag, sendRequest, sendRaw } = ws;
 
   // When the lecture ends (teacher pressed End, or it ended elsewhere) everyone is taken to the saved transcript.
   useEffect(() => { if (status === 'ended' && sessionId) { const t = setTimeout(() => navigate(`/transcripts/${sessionId}`, { replace: true }), 1500); return () => clearTimeout(t); } return undefined; }, [status, sessionId, navigate]);
@@ -141,10 +141,12 @@ export function LiveClassroomPage() {
   const videoSubtitleText = localInterim || interim?.text || latestSpeechCaption?.text || '';
   const videoSubtitleIsInterim = Boolean(localInterim || interim?.text);
   const showVideoStage = isTeacher ? (teacherCam.status === 'starting' || teacherCam.active) : teacherVideo.active;
+  const studentsInRoom = presence.filter((p) => p.role === 'student');
+  const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('') || '?';
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
+    <div className="flex flex-col gap-3 sm:gap-4">
+      <header className="p-3 sm:p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <StatusBadge status={badgeStatus} label={badgeLabel} />
           <div>
@@ -176,7 +178,7 @@ export function LiveClassroomPage() {
                 </span>
                 <Button variant="danger" size="sm" onClick={teacherCam.stop}>Turn off video</Button>
               </div>
-              <div className="relative bg-black aspect-video max-h-[340px] mx-auto flex items-center justify-center">
+              <div className="relative bg-black aspect-video max-h-[240px] sm:max-h-[340px] mx-auto flex items-center justify-center">
                 <video ref={teacherCam.videoRef} playsInline muted className="w-full h-full object-contain -scale-x-100" aria-label="Teacher camera preview" />
               </div>
               <div className="px-4 py-2.5 bg-slate-900 border-t border-slate-800 min-h-[3rem] flex items-center" aria-live="polite">
@@ -200,7 +202,7 @@ export function LiveClassroomPage() {
                 </span>
                 <span className="text-[11px] text-emerald-400 font-semibold">LIVE VIDEO</span>
               </div>
-              <div className="relative bg-black aspect-video max-h-[340px] mx-auto flex items-center justify-center">
+              <div className="relative bg-black aspect-video max-h-[240px] sm:max-h-[340px] mx-auto flex items-center justify-center">
                 {teacherVideo.frame ? (
                   <img src={teacherVideo.frame} alt="Teacher live video" className="w-full h-full object-contain -scale-x-100" />
                 ) : (
@@ -219,7 +221,50 @@ export function LiveClassroomPage() {
             </section>
           )}
 
-          <section className={`flex flex-col bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden ${showVideoStage ? 'h-[45vh] min-h-[260px]' : 'h-[60vh] lg:h-[calc(100vh-14rem)] min-h-[320px]'}`} aria-label="Live captions">
+          {isTeacher && (
+            <section className="p-3 sm:p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col gap-3" aria-labelledby="students-grid-h">
+              <div className="flex items-center justify-between gap-2">
+                <h2 id="students-grid-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  👥 Student cameras ({studentsInRoom.length} in class)
+                </h2>
+                <span className="text-[11px] text-slate-400">
+                  {studentsInRoom.filter((s) => studentVideos[s.id]?.active).length} camera on
+                </span>
+              </div>
+              {studentsInRoom.length === 0 ? (
+                <p className="text-xs text-slate-400 italic py-3 text-center bg-slate-950/60 rounded-xl border border-slate-800/80">
+                  Waiting for students to enter the live class…
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {studentsInRoom.map((s) => {
+                    const sv = studentVideos[s.id];
+                    const camOn = Boolean(sv?.active && sv?.frame);
+                    return (
+                      <div key={s.id} className="relative aspect-video rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+                        {camOn ? (
+                          <img src={sv.frame} alt={`${s.name} camera`} className="w-full h-full object-cover -scale-x-100" />
+                        ) : (
+                          <div className="flex flex-col items-center gap-1 text-center px-2">
+                            <span className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 text-emerald-300 font-bold text-xs flex items-center justify-center">
+                              {initials(s.name)}
+                            </span>
+                            <span className="text-[10px] text-slate-400">{sv?.active ? 'Connecting…' : 'Camera off'}</span>
+                          </div>
+                        )}
+                        <div className="absolute inset-x-0 bottom-0 px-2 py-1 bg-gradient-to-t from-black/85 via-black/50 to-transparent flex items-center justify-between gap-1 text-[11px]">
+                          <span className="text-white font-medium truncate">{s.name}</span>
+                          <span className={`shrink-0 w-2 h-2 rounded-full ${camOn ? 'bg-emerald-400' : 'bg-slate-500'}`} aria-hidden="true" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
+          <section className={`flex flex-col bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden ${showVideoStage ? 'h-[40vh] sm:h-[45vh] min-h-[240px]' : 'h-[52vh] lg:h-[calc(100vh-14rem)] min-h-[280px]'}`} aria-label="Live captions">
           <div className="p-3 border-b border-slate-800 bg-slate-900/50 flex justify-between text-xs text-slate-400">
             <span>💬 Live captions</span><span>Text size: {captionSize}px (change under Display)</span>
           </div>
@@ -325,7 +370,7 @@ export function LiveClassroomPage() {
                   ))}
                 </div>
               </section>
-              <SignInputPanel onSend={studentSend} onRequest={(k) => request(k, k.replace('_', ' '))} disabled={readOnly} />
+              <SignInputPanel onSend={studentSend} onRequest={(k) => request(k, k.replace('_', ' '))} sendRaw={sendRaw} disabled={readOnly} />
             </>
           )}
 

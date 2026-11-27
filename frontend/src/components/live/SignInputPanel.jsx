@@ -15,12 +15,14 @@ const PERMISSION_TEXT = { granted: 'Allowed', denied: 'Blocked', prompt: 'Will a
  * Student input: REAL camera gestures (MediaPipe) when the camera and model are working, plus quick phrases and typing, which always work.
  * A message is labelled "sign" only when every word in it came from a camera-recognised pose.
  */
-export function SignInputPanel({ onSend, onRequest, disabled = false, compact = false }) {
+export function SignInputPanel({ onSend, onRequest, sendRaw, disabled = false, compact = false }) {
   const [buffer, setBuffer] = useState([]);              // [{ text, via: 'gesture' | 'phrase' | 'typed' }]
   const [auto, setAuto] = useState(true);
   const [typed, setTyped] = useState('');
   const bufRef = useRef(buffer); bufRef.current = buffer;
   const timer = useRef(null);
+  const sendRawRef = useRef(sendRaw); sendRawRef.current = sendRaw;
+  const shareCanvasRef = useRef(null);
 
   const flush = useCallback(() => {
     clearTimeout(timer.current);
@@ -46,6 +48,33 @@ export function SignInputPanel({ onSend, onRequest, disabled = false, compact = 
   const onGesture = useCallback((id) => { const g = BY_ID[id]; if (g) add(g.phrase, 'gesture', g.request); }, [add]);
   const t = useHandTracker({ onGesture });
 
+  // Relay compact camera frames to the teacher while the student's camera is active.
+  useEffect(() => {
+    if (!t.running || !sendRawRef.current) return undefined;
+    if (!shareCanvasRef.current) {
+      const c = document.createElement('canvas');
+      c.width = 320;
+      c.height = 180;
+      shareCanvasRef.current = c;
+    }
+    const canvas = shareCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    sendRawRef.current({ type: 'student_video_state', active: true });
+    const id = setInterval(() => {
+      const video = t.videoRef.current;
+      if (!video || video.readyState < 2) return;
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const data = canvas.toDataURL('image/jpeg', 0.45);
+        if (data.length <= 58000) sendRawRef.current?.({ type: 'student_video_frame', data });
+      } catch { /* skip frame */ }
+    }, 180);
+    return () => {
+      clearInterval(id);
+      sendRawRef.current?.({ type: 'student_video_state', active: false });
+    };
+  }, [t.running, t.videoRef]);
+
   const ev = t.evaluation;
   const current = ev?.gesture ? BY_ID[ev.gesture] : null;
   let handText = '–', signText = '–';
@@ -67,12 +96,12 @@ export function SignInputPanel({ onSend, onRequest, disabled = false, compact = 
 
   return (
     <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col gap-3" aria-labelledby="sign-h">
-      <div className="flex items-start justify-between gap-2">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
           <h3 id="sign-h" className="text-xs font-bold uppercase tracking-wider text-slate-300">Respond to the class</h3>
-          <p className="text-[11px] text-slate-400">MediaPipe HandLandmarker + EchoClass MLP Neural Network run in your browser. Video never leaves your device.</p>
+          <p className="text-[11px] text-slate-400">MediaPipe HandLandmarker + EchoClass MLP Neural Network run in your browser. Your teacher can see your camera tile while your camera is on.</p>
         </div>
-        <Button variant={t.running ? 'danger' : 'secondary'} size="sm" onClick={t.running ? t.stop : t.start} disabled={disabled || t.status === 'starting' || t.status === 'loading-model'}>
+        <Button variant={t.running ? 'danger' : 'secondary'} size="sm" className="shrink-0" onClick={t.running ? t.stop : t.start} disabled={disabled || t.status === 'starting' || t.status === 'loading-model'}>
           {t.running ? 'Turn off camera' : '📷 Turn on camera'}
         </Button>
       </div>
